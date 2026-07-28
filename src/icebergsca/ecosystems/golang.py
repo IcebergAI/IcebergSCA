@@ -34,15 +34,17 @@ _REQUIRE = re.compile(
 #: ``replace old => new v1.2.3`` — the right-hand side is what actually builds.
 _REPLACE = re.compile(r"^(?P<left>\S+)(?:\s+\S+)?\s*=>\s*(?P<right>.+)$")
 
-#: Pseudo-versions encode a commit rather than a release:
-#: ``v0.0.0-20191109021931-daa7c04131f5``. OSV cannot match them to a range, but the
+#: Directives that may open a parenthesised block.
+#:
+#: Note on versions: a pseudo-version encodes a commit rather than a release
+#: (``v0.0.0-20191109021931-daa7c04131f5``). OSV cannot match one to a range, but the
 #: module is still worth querying, so the version is kept as-is.
 _BLOCK_KEYWORDS = ("require", "replace", "exclude", "retract")
 
 
 def _strip_comment(line: str) -> str:
     index = line.find("//")
-    return line if index == -1 else line[:index]
+    return line if index == -1 else line[:index].rstrip()
 
 
 def _parse_go_mod(path: Path, content: str) -> list[Dependency]:
@@ -75,7 +77,11 @@ def _parse_go_mod(path: Path, content: str) -> list[Dependency]:
             current = block
 
         if current == "replace":
-            match = _REPLACE.match(line)
+            # ``=> new v1.2.3 // use our fork`` is ordinary in the wild, and the
+            # right-hand side is greedy: without stripping the comment first the
+            # version fails to parse and the module is dropped from the scan
+            # altogether rather than being reported under either name.
+            match = _REPLACE.match(_strip_comment(line))
             if match:
                 left = match.group("left").strip()
                 right = match.group("right").strip().split()

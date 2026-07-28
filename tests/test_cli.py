@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+from icebergsca.cache import Cache
 from icebergsca.cli.main import ExitCode, app
+from icebergsca.core.errors import CacheError
 
 runner = CliRunner()
 
@@ -162,3 +165,42 @@ def test_empty_directory_still_succeeds(tmp_path: Path) -> None:
     result = runner.invoke(app, ["scan", str(tmp_path)])
     assert result.exit_code == ExitCode.OK
     assert "No dependency manifests" in result.stdout
+
+
+def test_cache_commands_report_an_unusable_cache_as_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken cache is the whole subject of these commands, not a stack trace."""
+
+    def refuse(path: Path | None = None) -> Cache:
+        raise CacheError("could not open cache at /nowhere: permission denied")
+
+    monkeypatch.setattr("icebergsca.cli.main.Cache.open", refuse)
+
+    for command in (["cache", "clear"], ["cache", "prune"]):
+        result = runner.invoke(app, command)
+        assert result.exit_code == ExitCode.SCAN_FAILED
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_cache_commands_report_a_failing_query_as_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure part-way through must still be an error message, not a traceback.
+
+    Both spellings exit 1 under the runner, so the assertion that matters is that no
+    exception escaped and the user got told what went wrong.
+    """
+
+    def explode(self: Cache) -> int:
+        raise CacheError("disk is full")
+
+    monkeypatch.setattr(
+        "icebergsca.cli.main.Cache.open", lambda path=None: Cache.memory()
+    )
+    monkeypatch.setattr(Cache, "clear", explode)
+
+    result = runner.invoke(app, ["cache", "clear"])
+    assert result.exit_code == ExitCode.SCAN_FAILED
+    assert isinstance(result.exception, SystemExit)
+    assert "disk is full" in result.stderr

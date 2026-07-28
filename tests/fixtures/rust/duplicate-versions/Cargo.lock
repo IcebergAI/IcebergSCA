@@ -1,0 +1,32 @@
+# Two versions of one crate in a single lock is routine in Rust: an old major is
+# pulled in transitively while the workspace depends on the current one directly.
+version = 3
+
+[[package]]
+name = "example-app"
+version = "0.1.0"
+dependencies = [
+ "legacy-dep",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "legacy-dep"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+dependencies = [
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
+
+[[package]]
+name = "windows-sys"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3333333333333333333333333333333333333333333333333333333333333333"

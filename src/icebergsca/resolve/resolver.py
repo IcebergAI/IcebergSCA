@@ -48,18 +48,25 @@ class Resolver:
         listings = await self._fetch_all(wanted)
 
         by_ref: dict[tuple[EcosystemId, str, str | None], str] = {}
+        # Counted per distinct constraint, not per declaration. The same package
+        # pinned the same way in six manifests of a monorepo is one constraint we
+        # could not resolve, and the warning built from this number says so.
+        attempted: set[tuple[EcosystemId, str, str | None]] = set()
         resolved = 0
         unresolved = 0
 
         for dep in pending:
             key = (dep.ref.ecosystem, dep.ref.name, dep.constraint)
-            if key in by_ref:
+            if key in attempted:
                 continue
+            attempted.add(key)
+
             versions = listings.get((dep.ref.ecosystem, dep.ref.name))
-            if not versions:
-                unresolved += 1
-                continue
-            chosen = best_match(dep.ref.ecosystem, versions, dep.constraint)
+            chosen = (
+                best_match(dep.ref.ecosystem, versions, dep.constraint)
+                if versions
+                else None
+            )
             if chosen is None:
                 unresolved += 1
                 continue

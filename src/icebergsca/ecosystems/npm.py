@@ -296,16 +296,14 @@ def _parse_lock_v1(path: Path, data: dict[str, Any]) -> list[Dependency]:
 
     known = set(nodes)
     for key, names in requires.items():
-        parent = key[: key.rfind(_NODE_MODULES)] if _NODE_MODULES in key else ""
+        # Resolution starts at the requiring package's own install path, so a copy
+        # nested directly beneath it wins over a hoisted one — Node's rule, and the
+        # difference between an edge to the version actually loaded and an edge to
+        # some other version of the same package elsewhere in the tree.
         children = [
             resolved
             for name in names
-            if (
-                resolved := _resolve_install_path(
-                    known, f"{parent}{_NODE_MODULES}{name}" if parent else key, name
-                )
-            )
-            is not None
+            if (resolved := _resolve_install_path(known, key, name)) is not None
         ]
         nodes[key] = replace(nodes[key], children=tuple(dict.fromkeys(children)))
 
@@ -349,8 +347,12 @@ def _parse_pnpm_lock(path: Path, content: str) -> list[Dependency]:
     if not isinstance(data, dict):
         raise ParseError(str(path), "expected a YAML mapping")
 
-    version = str(data.get("lockfileVersion", ""))
-    if version and float(version.split(".")[0] or 0) < 6:
+    version = str(data.get("lockfileVersion", "")).strip()
+    # pnpm has written the version as a bare number, a quoted string and a "v"-prefixed
+    # one across releases. Anything we cannot read a major out of is refused by name
+    # rather than allowed to raise, which would surface as an opaque "parser error".
+    major = re.match(r"v?(\d+)", version)
+    if version and (major is None or int(major.group(1)) < 6):
         raise UnsupportedFileError(
             str(path),
             f"pnpm lockfileVersion {version} is not supported (need 6.0 or later)",

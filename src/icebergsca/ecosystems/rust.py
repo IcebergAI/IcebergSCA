@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections import Counter, defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -109,27 +111,49 @@ def parse_lockfile(path: Path, content: str) -> list[Dependency]:
     if not isinstance(packages, list):
         raise ParseError(str(path), "no [[package]] entries found")
 
+    entries = [
+        package
+        for package in packages
+        if isinstance(package, dict) and isinstance(package.get("name"), str)
+    ]
+    # Two versions of one crate in a single lock is routine in Rust, and keying the
+    # graph on the bare name would drop all but the last — silently, and in the
+    # direction that hides a vulnerable older copy.
+    duplicated = {
+        name for name, count in Counter(p["name"] for p in entries).items() if count > 1
+    }
+
     nodes: dict[str, Node] = {}
+    by_name: dict[str, list[str]] = defaultdict(list)
+    requires: dict[str, list[str]] = {}
     local: set[str] = set()
 
-    for package in packages:
-        if not isinstance(package, dict) or not isinstance(package.get("name"), str):
-            continue
+    for package in entries:
         name = package["name"]
         version = (
             package.get("version") if isinstance(package.get("version"), str) else None
         )
 
+        key = _node_key(name, version, duplicated, taken=nodes)
+        by_name[name].append(key)
+        requires[key] = [
+            entry.strip()
+            for entry in package.get("dependencies") or []
+            if isinstance(entry, str)
+        ]
+        nodes[key] = Node(key=key, name=name, version=version)
+
         # Workspace members have no source; they are the project, not dependencies.
         if package.get("source") is None:
-            local.add(name)
+            local.add(key)
 
-        children = tuple(
-            match.group("name")
-            for entry in package.get("dependencies") or []
-            if isinstance(entry, str) and (match := _DEP_ENTRY.match(entry.strip()))
+    for key, entries_for_key in requires.items():
+        nodes[key] = replace(
+            nodes[key],
+            children=tuple(
+                dict.fromkeys(_resolve_edges(entries_for_key, by_name, nodes))
+            ),
         )
-        nodes[name] = Node(key=name, name=name, version=version, children=children)
 
     # Everything a workspace member requires is a direct dependency of the project.
     seeds: dict[str, Scope] = {}
@@ -146,6 +170,53 @@ def parse_lockfile(path: Path, content: str) -> list[Dependency]:
     return build_dependencies(
         resolve(nodes, seeds), nodes, ecosystem=EcosystemId.CARGO, path=path
     )
+
+
+def _node_key(
+    name: str, version: str | None, duplicated: set[str], *, taken: dict[str, Node]
+) -> str:
+    """A key unique within the lockfile.
+
+    The bare name is kept whenever a crate appears once, because that is what an
+    unambiguous dependency entry refers to. Only crates locked at several versions
+    take the ``name version`` form Cargo itself uses to disambiguate them.
+    """
+    if name not in duplicated:
+        return name
+    key = f"{name} {version}" if version else name
+    suffix = 2
+    while key in taken:
+        key = f"{name} {version or '?'}#{suffix}"
+        suffix += 1
+    return key
+
+
+def _resolve_edges(
+    entries: list[str], by_name: dict[str, list[str]], nodes: dict[str, Node]
+) -> list[str]:
+    """Point each dependency entry at the node it names.
+
+    Cargo writes just the crate name when the lock holds one version of it and
+    ``name version`` when it holds several. An entry that still cannot be pinned to
+    one node is linked to every candidate: an extra edge over-reports reachability,
+    while a missing one would leave a locked crate looking unused.
+    """
+    resolved: list[str] = []
+    for entry in entries:
+        match = _DEP_ENTRY.match(entry)
+        if match is None:
+            continue
+        name = match.group("name")
+        version = match.group("version")
+        candidates = by_name.get(name, [])
+        exact = f"{name} {version}" if version else None
+        if exact is not None and exact in nodes:
+            resolved.append(exact)
+        elif len(candidates) == 1:
+            resolved.append(candidates[0])
+        else:
+            resolved.extend(candidates)
+    return resolved
 
 
 SPEC = EcosystemSpec(

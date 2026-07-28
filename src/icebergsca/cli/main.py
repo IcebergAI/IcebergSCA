@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import IntEnum
 from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
@@ -342,12 +344,27 @@ cache_app = typer.Typer(help="Inspect and manage the on-disk OSV cache.")
 app.add_typer(cache_app, name="cache")
 
 
-def _refresh_cache() -> None:
+@contextmanager
+def _open_cache() -> Iterator[Cache]:
+    """Open the cache, reporting an unusable one as an error rather than a traceback.
+
+    A scan can carry on without a cache, so it only logs. These commands are *about*
+    the cache, so for them a failure to open one is the answer.
+    """
     try:
-        with Cache.open() as cache:
-            cache.clear()
+        cache = Cache.open()
     except IcebergSCAError as exc:
         _fail(str(exc))
+    try:
+        with cache:
+            yield cache
+    except IcebergSCAError as exc:
+        _fail(str(exc))
+
+
+def _refresh_cache() -> None:
+    with _open_cache() as cache:
+        cache.clear()
 
 
 @cache_app.command("info")
@@ -360,7 +377,7 @@ def cache_info() -> None:
         return
 
     typer.echo(f"size:     {path.stat().st_size:,} bytes")
-    with Cache.open() as cache:
+    with _open_cache() as cache:
         rows = list(cache.stats())
     if not rows:
         typer.echo("cache is empty")
@@ -373,7 +390,7 @@ def cache_info() -> None:
 @cache_app.command("clear")
 def cache_clear() -> None:
     """Delete every cached entry."""
-    with Cache.open() as cache:
+    with _open_cache() as cache:
         typer.echo(f"cleared {cache.clear()} entries")
 
 
@@ -384,7 +401,7 @@ def cache_prune() -> None:
     Advisory records are keyed by their modified timestamp, so they can never go
     stale and are always worth keeping.
     """
-    with Cache.open() as cache:
+    with _open_cache() as cache:
         typer.echo(f"pruned {cache.prune()} expired entries")
 
 
