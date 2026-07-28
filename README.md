@@ -14,12 +14,20 @@ Documentation: <https://icebergai.github.io/IcebergSCA/>
 
 ## Install
 
-It's a CLI application, not a library dependency — install it as a tool:
+Released from this repository, not from PyPI — there is no `icebergsca` package on PyPI, and
+anything published under that name is not this project. It's a CLI application, not a library
+dependency, so install it as a tool:
 
 ```bash
-uv tool install icebergsca      # or: uvx icebergsca scan .
-pipx install icebergsca
+uv tool install git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+pipx install git+https://github.com/IcebergAI/IcebergSCA.git@v0.1.0
+
+# or run it without installing
+uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0 icebergsca scan .
 ```
+
+Pin the tag: without `@v0.1.0` you get whatever `main` is at that moment. Upgrade by re-running
+the same command against a newer tag with `--force`.
 
 ## Usage
 
@@ -105,7 +113,9 @@ SARIF and CycloneDX are validated against the official published schemas in the 
 ### GitHub Actions
 
 ```yaml
-- run: uvx icebergsca scan . --format sarif --output icebergsca.sarif
+- run: >-
+    uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+    icebergsca scan . --format sarif --output icebergsca.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: icebergsca.sarif

@@ -31,7 +31,9 @@ A built-in `--fail-on <severity>` flag is planned but not yet implemented.
 
 ```yaml
 - name: Scan dependencies
-  run: uvx icebergsca scan . --format sarif --output icebergsca.sarif
+  run: >-
+    uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+    icebergsca scan . --format sarif --output icebergsca.sarif
 
 - uses: github/codeql-action/upload-sarif@v3
   with:
@@ -77,7 +79,9 @@ jobs:
       - uses: astral-sh/setup-uv@v8
 
       - name: Scan
-        run: uvx icebergsca scan . --exclude 'tests/fixtures/**' --format sarif --output sca.sarif
+        run: >-
+          uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+          icebergsca scan . --exclude 'tests/fixtures/**' --format sarif --output sca.sarif
 
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -93,7 +97,9 @@ because the code changed.
 
 ```yaml
 - name: Generate SBOM
-  run: uvx icebergsca sbom . --output sbom.cdx.json
+  run: >-
+    uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+    icebergsca sbom . --output sbom.cdx.json
 
 - uses: actions/upload-artifact@v5
   with:
