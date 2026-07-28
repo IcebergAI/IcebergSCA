@@ -1,0 +1,21 @@
+{
+  "name": "example-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "express": "4.19.2",
+    "@scope/widget": "~2.0.0",
+    "local-lib": "file:../local-lib",
+    "forked-thing": "git+https://github.com/example/forked-thing.git",
+    "anything": "*"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}

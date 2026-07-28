@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "example"
+version = "1.0.0"
+dependencies = [
+    "httpx>=0.27",
+    "Pydantic_Core==2.18.2",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.9"]
+test = ["pytest>=8.0"]
+cli = ["typer>=0.15"]
+
+[dependency-groups]
+lint = ["mypy>=1.14"]

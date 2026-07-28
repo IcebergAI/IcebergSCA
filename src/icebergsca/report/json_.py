@@ -1,0 +1,137 @@
+"""Canonical JSON report.
+
+This is the full-fidelity document every other consumer is expected to build on, so
+the shape is written out explicitly rather than derived with ``dataclasses.asdict``.
+An accidental field rename is a breaking change for anyone parsing it; making the
+serialisation deliberate is what keeps ``schema_version`` meaningful.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from icebergsca.core.models import (
+    Advisory,
+    Dependency,
+    Finding,
+    ManifestResult,
+    PackageRef,
+    ScanReport,
+)
+
+
+def render(report: ScanReport, *, color: bool = True, width: int | None = None) -> str:
+    """Serialise a report. ``color`` and ``width`` are ignored."""
+    return json.dumps(to_dict(report), indent=2, sort_keys=False) + "\n"
+
+
+def to_dict(report: ScanReport) -> dict[str, Any]:
+    return {
+        "schema_version": report.schema_version,
+        "tool": {"name": "icebergsca", "version": report.tool_version},
+        "scan": {
+            "root": str(report.root),
+            "started_at": report.started_at.isoformat(),
+            "finished_at": report.finished_at.isoformat(),
+            "status": report.status.value,
+            # Explicit rather than implied by an empty findings list: consumers must
+            # be able to tell "checked, nothing found" from "never checked".
+            "vulnerabilities_checked": report.vulnerabilities_checked,
+            "complete": report.is_complete,
+        },
+        "summary": {
+            "dependencies": len(report.dependencies),
+            "direct": report.direct_count,
+            "transitive": report.transitive_count,
+            "packages": len(report.packages),
+            "findings": len(report.findings),
+            "by_severity": {
+                level.value: count
+                for level, count in report.counts_by_severity().items()
+            },
+            "unchecked_packages": len(report.scan_failed),
+            "skipped_files": len(report.skipped),
+        },
+        "manifests": [_manifest(result) for result in report.manifests],
+        "dependencies": [_dependency(dep) for dep in report.dependencies],
+        "findings": [_finding(finding) for finding in report.sorted_findings()],
+        "unchecked_packages": [_package(ref) for ref in report.scan_failed],
+        "skipped": [
+            {"path": str(entry.path), "reason": entry.reason}
+            for entry in report.skipped
+        ],
+        "warnings": list(report.warnings),
+    }
+
+
+def _package(ref: PackageRef) -> dict[str, Any]:
+    return {
+        "ecosystem": ref.ecosystem.osv_name,
+        "name": ref.name,
+        "version": ref.version,
+        "purl": ref.purl,
+    }
+
+
+def _manifest(result: ManifestResult) -> dict[str, Any]:
+    return {
+        "ecosystem": result.ecosystem.osv_name,
+        "directory": str(result.directory),
+        "manifests": [str(path) for path in result.manifests],
+        "lockfiles": [str(path) for path in result.lockfiles],
+        "parsed": [str(path) for path in result.parsed],
+        "dependency_count": result.dependency_count,
+        "from_lockfile": result.from_lockfile,
+        "approximate": result.approximate,
+        "error": result.error,
+    }
+
+
+def _dependency(dep: Dependency) -> dict[str, Any]:
+    return {
+        "package": _package(dep.ref),
+        "scope": dep.scope.value,
+        "direct": dep.direct,
+        "pin": dep.pin.value,
+        "constraint": dep.constraint,
+        "source": {"path": str(dep.source.path), "line": dep.source.line},
+        "parents": [ref.purl for ref in dep.parents],
+    }
+
+
+def _advisory(advisory: Advisory) -> dict[str, Any]:
+    severity = advisory.severity
+    return {
+        "id": advisory.id,
+        "modified": advisory.modified,
+        "aliases": list(advisory.aliases),
+        "summary": advisory.summary,
+        "details": advisory.details,
+        "published": advisory.published,
+        "malicious": advisory.is_malicious,
+        "severity": {
+            "level": advisory.level.value,
+            "score": severity.score if severity else None,
+            "vector": severity.vector if severity else None,
+        },
+        "references": list(advisory.references),
+    }
+
+
+def _finding(finding: Finding) -> dict[str, Any]:
+    return {
+        "package": _package(finding.package),
+        "advisory": _advisory(finding.advisory),
+        "fixed_version": finding.fixed_version,
+        "direct": finding.is_direct,
+        "introduced_by": [
+            {
+                "path": str(dep.source.path),
+                "line": dep.source.line,
+                "scope": dep.scope.value,
+                "direct": dep.direct,
+            }
+            for dep in finding.introduced_by
+        ],
+    }

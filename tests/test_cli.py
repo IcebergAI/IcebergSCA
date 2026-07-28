@@ -1,0 +1,164 @@
+"""End-to-end CLI behaviour."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from icebergsca.cli.main import ExitCode, app
+
+runner = CliRunner()
+
+
+def project(tmp_path: Path) -> Path:
+    (tmp_path / "requirements.txt").write_text("requests==2.31.0\nflask>=2.0\n")
+    return tmp_path
+
+
+def test_version() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == ExitCode.OK
+    assert result.stdout.startswith("icebergsca ")
+
+
+def test_scan_succeeds_on_a_simple_project(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(project(tmp_path))])
+    assert result.exit_code == ExitCode.OK
+    assert "2 dependencies" in result.stdout
+
+
+def test_json_output_is_parseable_stdout(tmp_path: Path) -> None:
+    """``--format json | jq`` must work, so nothing else may reach stdout."""
+    result = runner.invoke(app, ["scan", str(project(tmp_path)), "--format", "json"])
+    assert result.exit_code == ExitCode.OK
+    document = json.loads(result.stdout)
+    assert [entry["package"]["name"] for entry in document["dependencies"]] == [
+        "requests",
+        "flask",
+    ]
+
+
+def test_output_file(tmp_path: Path) -> None:
+    destination = tmp_path / "out" / "report.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            str(project(tmp_path)),
+            "--format",
+            "json",
+            "--output",
+            str(destination),
+        ],
+    )
+    assert result.exit_code == ExitCode.OK
+    assert json.loads(destination.read_text())["schema_version"] == "1.0"
+
+
+def test_dev_dependencies_are_excluded_by_default(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1"\n'
+        'dependencies = ["httpx>=0.27"]\n\n'
+        '[project.optional-dependencies]\ndev = ["ruff>=0.9"]\n'
+    )
+    default = runner.invoke(app, ["scan", str(tmp_path), "--format", "json"])
+    names = {e["package"]["name"] for e in json.loads(default.stdout)["dependencies"]}
+    assert names == {"httpx"}
+
+    with_dev = runner.invoke(
+        app, ["scan", str(tmp_path), "--format", "json", "--include-dev"]
+    )
+    names = {e["package"]["name"] for e in json.loads(with_dev.stdout)["dependencies"]}
+    assert names == {"httpx", "ruff"}
+
+
+def test_scope_flag_overrides_include_dev(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1"\ndependencies = ["httpx>=0.27"]\n\n'
+        '[project.optional-dependencies]\ndev = ["ruff>=0.9"]\n'
+    )
+    result = runner.invoke(
+        app, ["scan", str(tmp_path), "--format", "json", "--scope", "dev"]
+    )
+    names = {e["package"]["name"] for e in json.loads(result.stdout)["dependencies"]}
+    assert names == {"ruff"}
+
+
+def test_ecosystem_filter(tmp_path: Path) -> None:
+    project(tmp_path)
+    (tmp_path / "package.json").write_text("{}")
+    result = runner.invoke(
+        app, ["scan", str(tmp_path), "--format", "json", "--ecosystem", "pypi"]
+    )
+    document = json.loads(result.stdout)
+    assert {m["ecosystem"] for m in document["manifests"]} == {"PyPI"}
+
+
+def test_exclude_glob(tmp_path: Path) -> None:
+    project(tmp_path)
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "requirements.txt").write_text("django==5.0\n")
+    result = runner.invoke(
+        app, ["scan", str(tmp_path), "--format", "json", "--exclude", "sub"]
+    )
+    document = json.loads(result.stdout)
+    assert len(document["manifests"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Exit codes
+# ---------------------------------------------------------------------------
+
+
+def test_missing_path_exits_scan_failed(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(tmp_path / "nope")])
+    assert result.exit_code == ExitCode.SCAN_FAILED
+
+
+def test_unknown_format_is_a_usage_error(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(project(tmp_path)), "--format", "yaml"])
+    assert result.exit_code == ExitCode.USAGE
+
+
+def test_unknown_scope_is_a_usage_error(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(project(tmp_path)), "--scope", "prod"])
+    assert result.exit_code == ExitCode.USAGE
+
+
+def test_sarif_output_is_valid_json(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scan", str(project(tmp_path)), "--format", "sarif"])
+    assert result.exit_code == ExitCode.OK
+    assert json.loads(result.stdout)["version"] == "2.1.0"
+
+
+def test_sbom_command_emits_cyclonedx(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["sbom", str(project(tmp_path))])
+    assert result.exit_code == ExitCode.OK
+    document = json.loads(result.stdout)
+    assert document["bomFormat"] == "CycloneDX"
+    assert {c["name"] for c in document["components"]} == {"requests", "flask"}
+
+
+def test_sbom_defaults_to_components_only(tmp_path: Path) -> None:
+    """An inventory should not need to ask anyone about vulnerabilities."""
+    result = runner.invoke(app, ["sbom", str(project(tmp_path))])
+    document = json.loads(result.stdout)
+    assert "vulnerabilities" not in document
+    properties = {p["name"]: p["value"] for p in document["metadata"]["properties"]}
+    assert properties["icebergsca:vulnerabilitiesChecked"] == "false"
+
+
+def test_sbom_with_vulnerabilities_adds_the_vex_section(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["sbom", str(project(tmp_path)), "--with-vulnerabilities"]
+    )
+    assert "vulnerabilities" in json.loads(result.stdout)
+
+
+def test_empty_directory_still_succeeds(tmp_path: Path) -> None:
+    """Nothing to scan is not a failure — it is a finding about the project."""
+    result = runner.invoke(app, ["scan", str(tmp_path)])
+    assert result.exit_code == ExitCode.OK
+    assert "No dependency manifests" in result.stdout

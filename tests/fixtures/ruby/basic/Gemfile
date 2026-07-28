@@ -1,0 +1,14 @@
+source "https://rubygems.org"
+
+gem "actionpack", "~> 7.1"
+gem "puma", "6.4.2"
+
+group :development, :test do
+  gem "rspec"
+end
+
+group :test do
+  gem "capybara"
+end
+
+gem "sidekiq", require: false

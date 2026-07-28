@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "icebergsca"
+version = "0.1.0"
+description = "Supply chain analysis for software projects — lockfile-first dependency scanning against OSV"
+readme = "README.md"
+requires-python = ">=3.11"
+# PEP 639: an SPDX expression plus the files to bundle. A "License ::" classifier
+# must not be used alongside this form.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Richard Hope" }]
+keywords = ["sca", "supply-chain", "security", "osv", "sbom", "cyclonedx", "vulnerabilities"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.0",
+    "httpx>=0.27",
+    "packaging>=24.0",
+    "defusedxml>=0.7",
+    "pyyaml>=6.0",
+    "platformdirs>=4.0",
+    "packageurl-python>=0.15",
+    "cvss>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/IcebergAI/icebergsca"
+Repository = "https://github.com/IcebergAI/icebergsca"
+Issues = "https://github.com/IcebergAI/icebergsca/issues"
+Changelog = "https://github.com/IcebergAI/icebergsca/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "jsonschema>=4.0",
+    "types-PyYAML>=6.0",
+    "types-jsonschema>=4.0",
+    "types-defusedxml>=0.7",
+]
+
+[project.scripts]
+icebergsca = "icebergsca.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/icebergsca"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "network: hits real upstream APIs; excluded from the default run",
+]
+addopts = "-m 'not network'"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src", "tests"]
+# Agent tooling config, and fixtures that must keep their exact original formatting.
+extend-exclude = [".claude", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+]
+
+[tool.mypy]
+files = ["src"]
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# cvss ships no py.typed marker. It is used only in osv/severity.py, behind a
+# narrow wrapper that returns our own Severity type, so the untyped surface is
+# one call and does not leak into the rest of the codebase.
+[[tool.mypy.overrides]]
+module = ["cvss.*"]
+ignore_missing_imports = true

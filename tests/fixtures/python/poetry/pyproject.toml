@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "example"
+version = "1.0.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31.0"
+pinned-thing = "1.2.3"
+tabled = { version = "~1.4", optional = false }
+local-pkg = { path = "../local" }
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.0"

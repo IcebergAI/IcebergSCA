@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "Newtonsoft.Json": {
+        "type": "Direct",
+        "requested": "[13.0.3, )",
+        "resolved": "13.0.3",
+        "contentHash": "aaaa"
+      },
+      "Serilog.Sinks.Console": {
+        "type": "Direct",
+        "requested": "[5.0.1, )",
+        "resolved": "5.0.1",
+        "contentHash": "bbbb",
+        "dependencies": {
+          "Serilog": "2.12.0"
+        }
+      },
+      "Serilog": {
+        "type": "Transitive",
+        "resolved": "2.12.0",
+        "contentHash": "cccc"
+      }
+    }
+  }
+}

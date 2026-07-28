@@ -1,0 +1,86 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Packaging --------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# NOTE: uv.lock is deliberately *not* ignored. IcebergSCA is an application, not a
+# library, so the lockfile belongs in version control — and this tool is
+# lockfile-first, which means committing our own lockfile is what lets it scan
+# itself with exact versions rather than resolved guesses.
+
+# --- Virtual environments ---------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Test, coverage and type caches -----------------------------------------
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Secrets and local configuration ----------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Editors and operating systems ------------------------------------------
+# No trailing slash: these are directories in a normal checkout but plain files
+# under the agent harness, and a directory-only pattern misses the file form.
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Merge and patch leftovers ----------------------------------------------
+*.orig
+*.rej
+
+# --- IcebergSCA's own output ------------------------------------------------
+# Running the scanner inside its own repository (which CI does, and which is the
+# quickest way to check a change by hand) drops report files in the working tree.
+# They are results, not source. Only format-specific extensions are listed —
+# ignoring a name as generic as report.json would surprise someone eventually.
+*.sarif
+*.cdx.json
+
+# A cache created by pointing `--cache-path` at the repo. The real one lives in the
+# per-user cache directory and never appears here.
+cache.db
+cache.db-wal
+cache.db-shm
+
+# --- Agent and harness scaffolding ------------------------------------------
+# In this checkout every entry under .claude/ — and the shell dotfiles below — is a
+# character special file injected by the agent harness rather than a real file.
+# `git add -A` fails outright when it encounters them, so they are excluded here.
+# Remove the .gitmodules line if this project ever gains real submodules.
+.claude/
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.mcp.json
+.profile
+.ripgreprc
+.zprofile
+.zshrc

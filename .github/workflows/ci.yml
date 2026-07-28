@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Run tests
+        run: uv run --python ${{ matrix.python-version }} --extra dev pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Build wheel and sdist
+        run: uv build
+      - name: Verify the console script is installable and runs
+        run: |
+          uv tool install --from dist/*.whl icebergsca
+          icebergsca --version
+      # The agent skill lives in a dot-directory. If packaging ever stops bundling
+      # it the tool keeps working and consuming agents silently lose their guidance,
+      # so it is checked explicitly rather than assumed.
+      - name: Verify the agent skill is bundled
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          skill = [n for n in names if "/.agents/skills/" in n]
+          assert any(n.endswith("SKILL.md") for n in skill), "SKILL.md missing from wheel"
+          assert any("references/" in n for n in skill), "skill references missing"
+          print(f"ok: {len(skill)} skill files bundled")
+          PY
+
+  # Dogfooding. IcebergSCA scans its own dependencies on every run, which is both a
+  # genuine supply chain check and an end-to-end test against the live OSV API — the
+  # one thing the offline unit suite deliberately cannot cover.
+  self-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Scan our own dependencies
+        run: uv run icebergsca scan . --exclude 'tests/fixtures/**' --no-color
+      - name: Produce SARIF
+        if: always()
+        run: |
+          uv run icebergsca scan . \
+            --exclude 'tests/fixtures/**' \
+            --format sarif --output icebergsca.sarif
+      - uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3.37.3
+        if: always()
+        with:
+          sarif_file: icebergsca.sarif
+          category: icebergsca
