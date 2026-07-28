@@ -24,7 +24,7 @@ from icebergsca.core.models import Finding, ScanReport, SeverityLevel
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 VERSION = "2.1.0"
 
-INFORMATION_URI = "https://github.com/IcebergAI/icebergsca"
+INFORMATION_URI = "https://github.com/IcebergAI/IcebergSCA"
 
 #: SARIF has three usable levels; CVSS has five bands. Anything at high or above is
 #: an error, so a critical finding cannot be filtered out as a mere warning.

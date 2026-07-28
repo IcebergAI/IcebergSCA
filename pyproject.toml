@@ -40,10 +40,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/IcebergAI/icebergsca"
-Repository = "https://github.com/IcebergAI/icebergsca"
-Issues = "https://github.com/IcebergAI/icebergsca/issues"
-Changelog = "https://github.com/IcebergAI/icebergsca/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/IcebergAI/IcebergSCA"
+Repository = "https://github.com/IcebergAI/IcebergSCA"
+Issues = "https://github.com/IcebergAI/IcebergSCA/issues"
+Changelog = "https://github.com/IcebergAI/IcebergSCA/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

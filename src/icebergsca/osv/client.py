@@ -53,7 +53,7 @@ _BACKOFF_BASE = 0.5  # seconds; doubles each attempt
 _BACKOFF_CAP = 8.0
 _REQUEST_TIMEOUT = 30.0
 
-USER_AGENT = "icebergsca (+https://github.com/IcebergAI/icebergsca)"
+USER_AGENT = "icebergsca (+https://github.com/IcebergAI/IcebergSCA)"
 
 
 @dataclass(frozen=True, slots=True)
