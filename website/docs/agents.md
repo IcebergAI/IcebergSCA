@@ -25,7 +25,7 @@ always the version documented.
 - [`references/ci-integration.md`](https://github.com/IcebergAI/IcebergSCA/blob/main/src/icebergsca/.agents/skills/icebergsca/references/ci-integration.md)
   — SARIF, SBOM artefacts, gating and caching
 
-## The part that matters
+## Before reporting a project clean
 
 An empty `findings` array means "checked and clean", "never checked" or
 "partially checked" — and only the report can say which. The skill exists mostly
@@ -87,7 +87,7 @@ if not report["findings"]:
 - **Escalate `malicious: true`.** An OSV `MAL-` advisory is a package published
   to attack its consumers, not a bug. The remediation is removal, not upgrade.
 
-## Keeping it honest
+## How the skill is kept current
 
 The skill is tested, not just written: `tests/test_skill.py` guards its
 location, frontmatter and links, and asserts that

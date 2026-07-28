@@ -5,7 +5,7 @@ SPDX can describe the same components but has no native way to say "and this one
 affected by CVE-2021-44228", which would mean shipping the interesting half of the
 report in a separate file.
 
-Written by hand rather than through ``cyclonedx-python-lib``. A supply chain scanner
+Written by hand rather than through ``cyclonedx-python-lib``. A dependency scanner
 that drags in a large dependency tree of its own is a poor advertisement for itself,
 and the document is a few nested dictionaries. Correctness is held by validating the
 output against the published schema in the test suite.

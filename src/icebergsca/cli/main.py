@@ -48,7 +48,7 @@ class ExitCode(IntEnum):
 
 app = typer.Typer(
     name="icebergsca",
-    help="Supply chain analysis: find dependencies, check them against OSV.",
+    help="Software composition analysis: find dependencies, check them against OSV.",
     no_args_is_help=True,
     add_completion=False,
 )

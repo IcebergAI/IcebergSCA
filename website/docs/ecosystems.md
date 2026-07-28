@@ -32,7 +32,7 @@ icebergsca scan . --ecosystem pypi,npm
     reports carry the **OSV** name in `package.ecosystem` and the purl type
     inside `package.purl`. Correlate on `purl`.
 
-## Caveats worth knowing
+## Caveats
 
 ### Go reads `go.mod`, never `go.sum`
 
@@ -49,8 +49,7 @@ exclusions. Not modelled: profiles, mirrors, relocation and version ranges.
 Affected manifests carry `approximate: true`, and the table marks them `~`.
 
 IcebergSCA never shells out to `mvn`. Running a project's own build in order to
-discover its dependencies is itself a supply chain risk, and a scanner is a
-strange place to take it.
+discover its dependencies is itself a supply chain risk.
 
 Gradle sees only literal declarations — no version catalogues, no computed
 versions.

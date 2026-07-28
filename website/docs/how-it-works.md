@@ -9,6 +9,12 @@ A scan is five stages: **discover → parse → resolve → scan → report**. E
 records what it could not do, and that record survives all the way into the
 output.
 
+The analysis is composition analysis: it inventories the third-party components
+a project declares and checks each one against known advisories. It does not
+read first-party source code, and it identifies a package by name and version
+rather than by what the downloaded artefact actually contains — so build
+provenance, signatures and typosquats are outside what a report can speak to.
+
 ## The five stages
 
 ### 1. Discover
@@ -56,7 +62,7 @@ Every package is looked up in [OSV](https://osv.dev), in two passes.
 `querybatch` returns advisory IDs; `GET /v1/vulns/{id}` returns the detail that
 makes severity and fix versions possible.
 
-Two behaviours here matter more than they look:
+Two behaviours here are worth spelling out:
 
 - **Alias merging is required, not cosmetic.** OSV returns one record per
   database, so a single CVE arrives as both a GHSA and a PYSEC record — rendered

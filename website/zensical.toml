@@ -3,7 +3,7 @@
 
 [project]
 site_name = "IcebergSCA"
-site_description = "Supply chain analysis for software projects: lockfile-first dependency scanning against OSV, with a report that never implies a clean result it did not earn."
+site_description = "Software composition analysis for software projects: lockfile-first dependency scanning against OSV, with a report that never implies a clean result it did not earn."
 site_author = "IcebergAI"
 site_url = "https://icebergai.github.io/IcebergSCA/"
 
@@ -122,8 +122,9 @@ check_paths = true
 # sites, but no page currently uses one — the theme lazy-loads mermaid.min.js
 # from **unpkg.com**, and every other asset on this site is self-hosted. Adding
 # a ```mermaid fence silently reintroduces a third-party CDN dependency at view
-# time; render the diagram as a table or an inline SVG instead. On a site for a
-# supply chain scanner that would be a particularly poor look.
+# time; render the diagram as a table or an inline SVG instead. On the site for
+# a tool that exists to find undeclared third-party code, that would be a
+# particularly poor look.
 custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
 ]

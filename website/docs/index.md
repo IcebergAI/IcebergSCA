@@ -9,15 +9,13 @@ hide:
 
 <img class="hero-wordmark" src="assets/icebergsca-horizontal.svg" alt="IcebergSCA">
 
-<p class="eyebrow">Supply chain analysis</p>
-
-Find. Resolve. Check. Report.
+<p class="eyebrow">Software composition analysis</p>
 
 <p class="tagline" markdown>
 Point IcebergSCA at a directory. It finds every dependency manifest and
 lockfile, builds the direct and transitive dependency set, looks each package up
-in **OSV**, and reports what it finds — including, precisely, everything it
-could **not** check.
+in **OSV**, and reports what it finds — including everything it could **not**
+check.
 </p>
 
 <div class="hero-cta" markdown>
@@ -42,15 +40,11 @@ it to the dependency tree it is meant to be auditing.
 
 ![A scan reporting 12 vulnerabilities across three Python packages](assets/scan-table.svg){ .term }
 
-## The one rule
+## What an empty findings list means
 
-A scanner is only worth running if you can trust its silence. Most of the design
-here follows from a single constraint: **never imply a clean result the tool did
-not earn.**
-
-An empty findings list means one of three very different things — checked and
-clean, never checked, or partially checked — and only the report can say which.
-So IcebergSCA says which:
+An empty findings list means one of three different things — checked and clean,
+never checked, or partially checked — and only the report can say which. So the
+report says which:
 
 - The OSV lookup not running is reported as *"vulnerability lookup did not
   run"*, never as *"no vulnerabilities found"*. JSON carries an explicit
@@ -90,7 +84,7 @@ So IcebergSCA says which:
 
     [:octicons-arrow-right-24: Ecosystem support](ecosystems.md)
 
--   :material-file-tree: __Real dependency graphs__
+-   :material-file-tree: __Transitive dependency graphs__
 
     ---
 
@@ -111,13 +105,13 @@ So IcebergSCA says which:
 
     [:octicons-arrow-right-24: Output and CI](output.md)
 
--   :material-gate-alert: __Findings never fail your build__
+-   :material-gate-alert: __Findings never change the exit code__
 
     ---
 
     Exit `0` means the scan completed, findings or not. A non-zero exit always
-    means the tool could not do its job — so nobody ever appends `|| true` and
-    silences genuine failures along with the noise.
+    means the tool could not do its job, which is what keeps `|| true` off the
+    end of the command and genuine failures visible.
 
     [:octicons-arrow-right-24: Exit codes](output.md#exit-codes)
 
@@ -125,20 +119,20 @@ So IcebergSCA says which:
 
     ---
 
-    A skill ships inside the wheel, the way FastAPI, Typer and SQLModel do.
-    Agents that glob site-packages find it after install: invocation, the JSON
-    schema, exit-code semantics, and the three fields to check before calling a
-    project clean.
+    A skill ships inside the wheel, following the convention FastAPI, Typer and
+    SQLModel use. Agents that glob site-packages find it after install:
+    invocation, the JSON schema, exit-code semantics, and the three fields to
+    check before calling a project clean.
 
     [:octicons-arrow-right-24: For AI agents](agents.md)
 
 </div>
 
-## Built to be scanned as well as to scan
+## The tool's own dependencies
 
-A supply chain scanner with a large dependency tree of its own is a poor
+A dependency scanner with a large dependency tree of its own is a poor
 advertisement. Ranges, SARIF and CycloneDX are hand-written rather than pulled
-from packages, correctness held by schema validation against the official
+from packages, with correctness held by schema validation against the official
 schemas. Maven graphs are reconstructed from Central rather than shelling out to
 `mvn`, because running a project's build to discover its dependencies is itself
 a supply chain risk. CI scans this repository with the tool on every run.

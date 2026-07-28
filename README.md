@@ -1,8 +1,12 @@
 # IcebergSCA
 
-Supply chain analysis for software projects. Point it at a directory; it finds every
-dependency manifest and lockfile, builds the direct and transitive dependency set, looks each
-package up in [OSV](https://osv.dev), and reports what it finds.
+Software composition analysis (SCA) for software projects. Point it at a directory; it finds
+every dependency manifest and lockfile, builds the direct and transitive dependency set, looks
+each package up in [OSV](https://osv.dev), and reports what it finds.
+
+It inventories the third-party components a project declares; it does not read first-party
+source code, and it identifies a package by name and version rather than by what the
+downloaded artefact contains.
 
 Documentation: <https://icebergai.github.io/IcebergSCA/>
 
@@ -47,8 +51,8 @@ lockfile is present does it fall back to resolving version ranges against the re
 those findings are labelled `resolved` rather than `pinned`. Java, which has no lockfile, gets
 its graph reconstructed from Maven Central and is marked `~` for approximate.
 
-**It never claims to be clean when it isn't.** This is the design constraint everything else
-bends around:
+**A clean result is never implied unless it was earned.** Most of the rest of the design
+follows from this:
 
 - An empty findings list because the lookup never ran is reported as *"vulnerability lookup did
   not run"*, never as *"no vulnerabilities found"*. The JSON carries an explicit
@@ -60,7 +64,7 @@ bends around:
   are declared rather than installed.
 - Skipped files, truncated graphs and unresolved constraints are all counted and shown.
 
-**Findings never fail your build.**
+**Findings do not change the exit code.**
 
 | Exit code | Meaning |
 |---|---|
@@ -119,10 +123,9 @@ icebergsca/.agents/skills/icebergsca/SKILL.md
 ```
 
 Agents that glob site-packages for `SKILL.md` will find it automatically after install. It
-covers invocation, the JSON schema, exit-code semantics, and — most importantly — the three
-fields that must be checked before reporting a project as clean. An empty `findings` array
-means "checked and clean", "never checked" or "partially checked", and only the report can say
-which.
+covers invocation, the JSON schema, exit-code semantics, and the three fields to check before
+reporting a project as clean. An empty `findings` array means "checked and clean", "never
+checked" or "partially checked", and only the report can say which.
 
 ## Caching
 

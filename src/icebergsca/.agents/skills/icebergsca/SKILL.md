@@ -1,11 +1,11 @@
 ---
 name: icebergsca
-description: IcebergSCA usage and output interpretation. Use when scanning a project for vulnerable dependencies, auditing a supply chain, generating an SBOM, or reading an IcebergSCA report. Covers the JSON schema, exit codes, and the checks required before reporting a project as clean.
+description: IcebergSCA usage and output interpretation. Use when scanning a project for vulnerable dependencies, performing software composition analysis, generating an SBOM, or reading an IcebergSCA report. Covers the JSON schema, exit codes, and the checks required before reporting a project as clean.
 ---
 
 # IcebergSCA
 
-Official IcebergSCA skill for running supply chain scans and reading the results correctly.
+Official IcebergSCA skill for running dependency scans and reading the results correctly.
 
 IcebergSCA walks a project, finds every dependency manifest and lockfile, resolves the
 dependency graph, checks each package against [OSV](https://osv.dev), and reports findings.
