@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,19 @@ from icebergsca.cli.main import ExitCode, app
 from icebergsca.core.errors import CacheError
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def plain(text: str) -> str:
+    """Strip the styling Rich applies when it thinks it is writing to a terminal.
+
+    Rich treats CI as a terminal, so help output is bare locally but styled under
+    GitHub Actions — and it styles each choice in a metavar separately, which puts
+    escape codes between every value. Anything asserting on rendered help has to
+    strip them or it passes only off CI.
+    """
+    return _ANSI.sub("", text)
 
 
 def project(tmp_path: Path) -> Path:
@@ -97,6 +111,29 @@ def test_ecosystem_filter(tmp_path: Path) -> None:
     )
     document = json.loads(result.stdout)
     assert {m["ecosystem"] for m in document["manifests"]} == {"PyPI"}
+
+
+def test_scope_flag_is_repeatable(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1"\ndependencies = ["httpx>=0.27"]\n\n'
+        '[project.optional-dependencies]\ndev = ["ruff>=0.9"]\n'
+    )
+    result = runner.invoke(
+        app,
+        ["scan", str(tmp_path), "--format", "json", "--scope", "runtime"]
+        + ["--scope", "dev"],
+    )
+    names = {e["package"]["name"] for e in json.loads(result.stdout)["dependencies"]}
+    assert names == {"httpx", "ruff"}
+
+
+def test_enum_choices_are_listed_in_help() -> None:
+    """A bare ``<str>`` metavar tells a reader nothing about what is accepted."""
+    # Wide enough that Rich does not wrap the metavar column mid-value.
+    result = runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
+    rendered = plain(result.stdout)
+    assert "<pypi|npm|maven|go|cargo|nuget|rubygems>" in rendered
+    assert "<runtime|dev|test|build|optional>" in rendered
 
 
 def test_exclude_glob(tmp_path: Path) -> None:

@@ -35,7 +35,7 @@ the same command against a newer tag with `--force`.
 icebergsca scan ./myproject
 icebergsca scan ./myproject --format json --output report.json
 icebergsca scan ./myproject --include-dev
-icebergsca scan ./myproject --ecosystem pypi,npm --exclude 'fixtures/**'
+icebergsca scan ./myproject --ecosystem pypi --ecosystem npm --exclude 'fixtures/**'
 icebergsca scan ./requirements.txt            # a single file works too
 
 icebergsca sbom ./myproject                    # CycloneDX 1.6, components only
