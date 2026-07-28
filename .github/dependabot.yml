@@ -1,0 +1,15 @@
+# Keeps the SHA-pinned actions and Python dependencies current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # uv (not pip): the project's Python deps live in pyproject.toml/uv.lock, and
+  # the pip ecosystem would also pick up the manifests under tests/fixtures/,
+  # which are test data pinned to deliberately vulnerable versions.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
