@@ -41,6 +41,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/IcebergAI/IcebergSCA"
+Documentation = "https://icebergai.github.io/IcebergSCA/"
 Repository = "https://github.com/IcebergAI/IcebergSCA"
 Issues = "https://github.com/IcebergAI/IcebergSCA/issues"
 Changelog = "https://github.com/IcebergAI/IcebergSCA/blob/main/CHANGELOG.md"

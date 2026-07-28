@@ -69,6 +69,12 @@ cache.db
 cache.db-wal
 cache.db-shm
 
+# --- Documentation site -----------------------------------------------------
+# Zensical build output and its incremental cache. The site is built and
+# published by .github/workflows/docs.yml; only website/docs/ is source.
+website/site/
+website/.cache/
+
 # --- Agent and harness scaffolding ------------------------------------------
 # In this checkout every entry under .claude/ — and the shell dotfiles below — is a
 # character special file injected by the agent harness rather than a real file.

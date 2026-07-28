@@ -4,6 +4,8 @@ Supply chain analysis for software projects. Point it at a directory; it finds e
 dependency manifest and lockfile, builds the direct and transitive dependency set, looks each
 package up in [OSV](https://osv.dev), and reports what it finds.
 
+Documentation: <https://icebergai.github.io/IcebergSCA/>
+
 ![A scan reporting 12 vulnerabilities across three Python packages](docs/img/scan-table.svg)
 
 ## Install
