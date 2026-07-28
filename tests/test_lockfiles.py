@@ -314,9 +314,54 @@ def test_package_lock_without_a_recognised_shape_fails_clearly() -> None:
         npm.parse_lockfile(Path("package-lock.json"), '{"lockfileVersion": 9}')
 
 
+def nested_v1() -> list[Dependency]:
+    return npm.parse_lockfile(
+        Path("package-lock.json"),
+        (FIXTURES / "npm" / "lock-v1-nested" / "package-lock.json").read_text(),
+    )
+
+
+def test_lock_v1_edges_prefer_a_privately_nested_copy() -> None:
+    """Node resolves from the requiring package's own directory outwards.
+
+    ``inner`` has its own ``ms@2.0.0`` installed beneath it, so that is the copy it
+    loads. Starting the walk one level too high found the hoisted ``ms@9.9.9``
+    instead — an edge to a version that package never sees, which misattributes
+    every finding reported against it.
+    """
+    parsed = nested_v1()
+    inner_ms = next(
+        d for d in parsed if d.ref.name == "ms" and d.ref.version == "2.0.0"
+    )
+    hoisted = next(d for d in parsed if d.ref.name == "ms" and d.ref.version == "9.9.9")
+    assert [ref.name for ref in inner_ms.parents] == ["inner"]
+    assert hoisted.parents == ()
+
+
+def test_lock_v1_nested_copies_are_still_reachable() -> None:
+    """An unreachable node defaults to runtime, hiding the scope it really has."""
+    parsed = nested_v1()
+    inner_ms = next(
+        d for d in parsed if d.ref.name == "ms" and d.ref.version == "2.0.0"
+    )
+    assert inner_ms.direct is False
+
+
 # ---------------------------------------------------------------------------
 # pnpm-lock.yaml
 # ---------------------------------------------------------------------------
+
+
+def test_pnpm_unreadable_lockfile_version_is_refused_by_name() -> None:
+    """An old pnpm wrote ``lockfileVersion: 'v5'``, which is not a float.
+
+    Letting the conversion raise turned a supported-version problem into an opaque
+    "parser error", which reads like a bug in us rather than a file we decline.
+    """
+    with pytest.raises(UnsupportedFileError, match="lockfileVersion"):
+        npm.parse_lockfile(
+            Path("pnpm-lock.yaml"), "lockfileVersion: 'v5'\npackages: {}"
+        )
 
 
 def test_pnpm_reads_importers_as_seeds() -> None:

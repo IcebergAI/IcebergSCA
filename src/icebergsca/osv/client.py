@@ -30,6 +30,7 @@ import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -151,9 +152,21 @@ class OSVClient:
             if results is None:
                 failed.extend(self._fall_back_to_stale(chunk, summaries))
                 continue
-            for ref, vulns in zip(chunk, results, strict=False):
+
+            # Results are positional. A short array means OSV did not answer for the
+            # tail of the batch, and those packages are unchecked — never clean.
+            # Padding them with an empty advisory list here would cache "no known
+            # vulnerabilities" for a package nobody ever looked up.
+            answered = min(len(results), len(chunk))
+            for ref, vulns in zip(chunk[:answered], results, strict=False):
                 summaries[ref] = vulns
                 self._cache.set("osv_query", _query_key(ref), vulns)
+            if answered < len(chunk):
+                self._warnings.append(
+                    f"OSV answered {answered} of {len(chunk)} queries in a batch; "
+                    "the rest are reported as unchecked"
+                )
+                failed.extend(self._fall_back_to_stale(chunk[answered:], summaries))
 
         self._cache.commit()
         return summaries, failed
@@ -222,9 +235,14 @@ class OSVClient:
                     "the list shown is incomplete"
                 )
 
-        # Pad rather than misalign: results are positional, so a short array would
-        # otherwise attribute one package's advisories to another.
-        out.extend([] for _ in range(len(refs) - len(out)))
+        # Never padded and never truncated silently: results are positional, so the
+        # caller pairs off what came back and treats any shortfall as unchecked.
+        if len(out) > len(refs):
+            self._warnings.append(
+                "OSV returned more results than queries; the extra entries were "
+                "discarded because they cannot be attributed to a package"
+            )
+            del out[len(refs) :]
         return out
 
     # -- stage 2: advisory detail ------------------------------------------
@@ -266,8 +284,12 @@ class OSVClient:
             entry = self._cache.get("osv_vuln", key, allow_stale=True)
             return key, entry.payload if entry else None
 
+        # The ID is upstream data being interpolated into a request path; quoting it
+        # keeps a malformed advisory record from steering the request elsewhere.
         async with self._semaphore:
-            response = await self._request("GET", f"{VULN_URL}/{advisory_id}")
+            response = await self._request(
+                "GET", f"{VULN_URL}/{quote(advisory_id, safe='')}"
+            )
 
         if response is None:
             # Losing detail for one advisory does not invalidate the finding — the
@@ -290,6 +312,11 @@ class OSVClient:
         last_error = ""
 
         for attempt in range(_MAX_ATTEMPTS):
+            # Nothing follows the final attempt, so sleeping after it would only
+            # delay the failure the caller is already going to be told about.
+            final = attempt == _MAX_ATTEMPTS - 1
+            retry_after: str | None = None
+
             try:
                 response = await self._client.request(
                     method, url, timeout=_REQUEST_TIMEOUT, **kwargs
@@ -299,14 +326,14 @@ class OSVClient:
             else:
                 if response.status_code < 400:
                     return response
-                if response.status_code not in _RETRY_STATUS:
-                    last_error = f"HTTP {response.status_code}"
-                    break
                 last_error = f"HTTP {response.status_code}"
-                await self._sleep(attempt, response.headers.get("Retry-After"))
-                continue
+                if response.status_code not in _RETRY_STATUS:
+                    break
+                retry_after = response.headers.get("Retry-After")
 
-            await self._sleep(attempt, None)
+            if final:
+                break
+            await self._sleep(attempt, retry_after)
 
         self._warnings.append(f"{method} {url} failed after retries: {last_error}")
         logger.warning("%s %s failed: %s", method, url, last_error)

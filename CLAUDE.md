@@ -72,34 +72,47 @@ for free.
 FastAPI, Typer and SQLModel use (`<package>/.agents/skills/<name>/SKILL.md` plus
 `references/`). Consuming agents find it by globbing site-packages.
 
-Keep it current when behaviour changes — a skill describing flags that no longer exist is
-worse than none. `tests/test_skill.py` guards the location, frontmatter, reference links, and
-that `references/json-report.md` documents every top-level key the JSON renderer emits; CI
-separately asserts the dot-directory survives packaging. Hatchling bundles it without extra
-configuration today, but that is verified rather than assumed.
+Keep it current when behaviour changes — a skill describing flags that no longer exist is worse
+than none. `tests/test_skill.py` guards location, frontmatter, links, and that
+`references/json-report.md` documents every top-level key the JSON renderer emits; CI asserts the
+dot-directory survives packaging.
 
 ### Adding an output format
 
-Add a module in `report/` with `render(report, *, color, width) -> str`, register it in
-`_RENDERERS`, add the enum member. `test_every_declared_format_renders` will pick it up.
+Module in `report/` with `render(report, *, color, width) -> str`, register in `_RENDERERS`, add
+the enum member. `test_every_declared_format_renders` picks it up.
 
 ## Non-obvious decisions
 
-**Manifests are parsed even when a lockfile wins.** `_apply_manifest_hints` in `scanner.py`
-merges directness and scope from the manifest into the lockfile's versions, because
-`poetry.lock`, `Pipfile.lock`, `Cargo.lock` and `yarn.lock` record none of it. Manifest scope
-only ever *widens* inclusion, so a stray dev declaration cannot hide a shipping package.
+**Manifests are parsed even when a lockfile wins.** `_apply_manifest_hints` in `scanner.py` merges
+directness and scope from the manifest into the lockfile's versions, because `poetry.lock`,
+`Pipfile.lock`, `Cargo.lock` and `yarn.lock` record none of it. Manifest scope only ever *widens*
+inclusion, so a stray dev declaration cannot hide a shipping package.
 
-**OSV alias merging is required, not cosmetic.** OSV returns a separate record per database, so
-one CVE arrives as both GHSA and PYSEC. Rendered raw that is the same vulnerability listed
-twice at two different severities (GHSA usually carries a CVSS vector; PYSEC usually does not).
-`merge_aliases` in `osv/client.py` groups by the transitive closure of IDs and aliases and keeps
-the best-informed record. Removing it doubles the finding count.
+**OSV alias merging is required, not cosmetic.** OSV returns a record per database, so one CVE
+arrives as both GHSA and PYSEC — rendered raw, the same vulnerability twice at two severities
+(GHSA usually carries a CVSS vector; PYSEC usually does not). `merge_aliases` in `osv/client.py`
+groups by the transitive closure of IDs/aliases, keeping the best-informed record. Removing it
+doubles the finding count.
 
-**`querybatch` returns only `id` and `modified`** — not `summary` or `severity`, despite the
-field names suggesting otherwise. Stage two (`GET /v1/vulns/{id}`) is what makes severity and
-fix versions possible. That `modified` value is also the cache key suffix, which is why
-`osv_vuln` has no TTL.
+**`querybatch` returns only `id` and `modified`** — not `summary` or `severity`, despite the field
+names. Stage two (`GET /v1/vulns/{id}`) is what makes severity and fix versions possible; that
+`modified` value is also the cache key suffix, which is why `osv_vuln` has no TTL.
+
+**`querybatch` results are positional, and a short array is never padded.** Filling the tail with
+empty advisory lists keeps the alignment honest but says "no known vulnerabilities" about packages
+nobody looked up — and caches it for a day. Anything OSV did not answer for goes to
+`_fall_back_to_stale` and ends up in `scan_failed`.
+
+**Lockfile node keys must survive duplicate names.** `Cargo.lock` holds two majors of a crate
+routinely, and keying the graph on the bare name drops all but the last. `rust.py` uses the bare
+name only while a name is unique and Cargo's own `name version` form otherwise; npm resolves edges
+by install path for the same reason. Any new parser keyed on name alone has this bug.
+
+**An empty Maven scope is not `compile`.** `RawDependency.scope` holds exactly what the element
+declared, because a `dependencyManagement` entry can supply the scope for a dependency that
+declares none — which is how a BOM pins a family to `test`. `DEFAULT_SCOPE` is applied at the point
+of use, not at parse time.
 
 **Version keys are padded to four components** (`core/versions.py`). Without it `1.0` sorts
 below `1.0.0` and a NuGet range of `[1.0,2.0]` excludes `2.0.0`.
@@ -107,16 +120,15 @@ below `1.0.0` and a NuGet range of `[1.0,2.0]` excludes `2.0.0`.
 **A version must start with a digit.** Otherwise a Git commit hash like `abcdef123456` parses
 as version `(123456,)` and orders as a real version.
 
-**Maven is approximate and says so.** We implement parent inheritance, BOM imports,
-nearest-wins and exclusions — not profiles, mirrors, relocation or version ranges. Never shell
-out to `mvn`: running a project's build to discover its dependencies is itself a supply chain
-risk. `MavenResolver._backfill` re-reads `pom.xml` to apply BOM-supplied versions to direct
-dependencies, which the synchronous parser cannot do because BOMs live on Central.
+**Maven is approximate and says so.** Parent inheritance, BOM imports, nearest-wins and exclusions
+— not profiles, mirrors, relocation or version ranges. Never shell out to `mvn`: running a
+project's build to discover its dependencies is itself a supply chain risk.
+`MavenResolver._backfill` re-reads `pom.xml` to apply BOM-supplied versions to direct dependencies,
+which the synchronous parser cannot do because BOMs live on Central.
 
-**Ranges are matched in-house** (`resolve/ranges.py`) rather than via a semver package. A
-supply chain scanner with a large dependency tree of its own is a poor advertisement. Same
-reasoning for hand-writing SARIF and CycloneDX; correctness is held by schema validation in
-`tests/test_report_formats.py` against the vendored official schemas in `tests/schemas/`.
+**Ranges, SARIF and CycloneDX are hand-written** rather than pulled from packages — a supply chain
+scanner with a large dependency tree of its own is a poor advertisement. Correctness is held by
+schema validation in `tests/test_report_formats.py` against the official schemas in `tests/schemas/`.
 
 **Exit code 2 is usage, 1 is scan failure** — the reverse of the original plan, because Click
 reserves 2 for usage errors and remapping it means overriding framework internals for nothing.
@@ -133,18 +145,12 @@ reserves 2 for usage errors and remapping it means overriding framework internal
 
 ## Verification against ground truth
 
-The parsers are worth cross-checking against the tools that own the formats:
+Cross-check parsers against the tools that own the formats: `uv tree --no-dev`, `npm ls --all`,
+`cargo tree`, `go list -m all`.
 
-```bash
-uv tree --no-dev                 # Python
-npm ls --all                     # npm
-cargo tree                       # Rust
-go list -m all                   # Go
-```
-
-`icebergsca scan . --ecosystem pypi --format json` should agree with `uv tree` on both the
-package set and versions. It has caught two real bugs already (a missing `coverage[toml]` extra
-traversal, and `spring-web` left unversioned by an unapplied BOM).
+`icebergsca scan . --ecosystem pypi --format json` should agree with `uv tree` on both package set
+and versions. This has caught two real bugs (a missing `coverage[toml]` extra traversal, and
+`spring-web` left unversioned by an unapplied BOM).
 
 ## Known gaps
 

@@ -241,6 +241,51 @@ def test_csv_carries_severity_and_purl() -> None:
     assert row["purl"] == "pkg:pypi/requests@2.31.0"
 
 
+def test_csv_neutralises_a_formula_in_an_advisory_summary() -> None:
+    """CSV is opened in spreadsheets, and summaries come from OSV.
+
+    A summary beginning with ``=`` is a live formula the moment someone double-clicks
+    the report, so it is written as text instead.
+    """
+    dep = make_dependency("requests")
+    row = rows(
+        {
+            "vulnerabilities_checked": True,
+            "findings": (
+                Finding(
+                    package=dep.ref,
+                    advisory=make_advisory(summary='=HYPERLINK("http://evil","click")'),
+                    introduced_by=(dep,),
+                ),
+            ),
+        }
+    )[0]
+    assert row["summary"].startswith("'=")
+
+
+def test_csv_neutralises_a_formula_in_a_package_name() -> None:
+    """Package names and paths come out of the repository being scanned."""
+    dep = make_dependency("@SUM(1+1)", path="-cmd|calc")
+    row = rows(
+        {
+            "vulnerabilities_checked": True,
+            "findings": (
+                Finding(
+                    package=dep.ref, advisory=make_advisory(), introduced_by=(dep,)
+                ),
+            ),
+        }
+    )[0]
+    assert row["package"].startswith("'@")
+    assert row["source_file"].startswith("'-")
+
+
+def test_csv_leaves_ordinary_values_untouched() -> None:
+    row = rows({"vulnerabilities_checked": True, "findings": (finding(),)})[0]
+    assert row["summary"] == "Example vulnerability"
+    assert row["package"] == "requests"
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------

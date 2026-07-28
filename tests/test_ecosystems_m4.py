@@ -61,6 +61,30 @@ def test_go_local_replacement_is_dropped_not_misattributed() -> None:
     assert "github.com/local/thing" not in go_mod()
 
 
+def replace_mod() -> dict[str, Dependency]:
+    return by_name(
+        golang.SPEC.parse_lockfile(Path("go.mod"), read("go", "replace", "go.mod"))
+    )
+
+
+def test_go_replace_survives_a_trailing_comment() -> None:
+    """A comment on the replace line must not cost us the module entirely.
+
+    The right-hand side is greedy, so an unstripped ``// patched upstream`` made the
+    version unparseable — and an unversioned replacement is dropped. The module then
+    appeared under neither name and vanished from the scan without a warning.
+    """
+    deps = replace_mod()
+    assert deps["github.com/example/errors"].ref.version == "v1.2.3"
+    assert "github.com/pkg/errors" not in deps
+
+
+def test_go_commented_local_replacement_is_still_recognised_as_local() -> None:
+    deps = replace_mod()
+    assert "github.com/stretchr/testify" not in deps
+    assert deps["golang.org/x/text"].ref.version == "v0.14.0"
+
+
 def test_go_ignores_exclude_directives() -> None:
     assert "github.com/bad/module" not in go_mod()
 
@@ -118,6 +142,34 @@ def test_cargo_lock_seeds_directness_from_workspace_members() -> None:
 def test_cargo_lock_dependency_entries_may_carry_a_version() -> None:
     """Entries are "name" or "name version"; only the name identifies the edge."""
     assert [ref.name for ref in cargo_lock()["proc-macro2"].parents] == ["serde_derive"]
+
+
+def duplicate_lock() -> list[Dependency]:
+    return rust.parse_lockfile(
+        Path("Cargo.lock"), read("rust", "duplicate-versions", "Cargo.lock")
+    )
+
+
+def test_cargo_lock_keeps_every_version_of_a_duplicated_crate() -> None:
+    """Keying the graph on the bare name dropped all but the last copy.
+
+    Rust locks two majors of a crate side by side routinely. Collapsing them reports
+    only whichever came last in the file, so a vulnerable older copy that is genuinely
+    installed disappears — the exact false-clean this tool exists to avoid.
+    """
+    versions = {
+        dep.ref.version for dep in duplicate_lock() if dep.ref.name == "windows-sys"
+    }
+    assert versions == {"0.48.0", "0.52.0"}
+
+
+def test_cargo_lock_versioned_edges_point_at_the_right_copy() -> None:
+    deps = duplicate_lock()
+    old = next(d for d in deps if d.ref.version == "0.48.0")
+    new = next(d for d in deps if d.ref.version == "0.52.0")
+    assert [ref.name for ref in old.parents] == ["legacy-dep"]
+    assert new.parents == ()
+    assert new.direct is True
 
 
 def test_cargo_toml_scopes() -> None:

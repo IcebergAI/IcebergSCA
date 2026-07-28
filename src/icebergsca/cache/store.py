@@ -104,7 +104,7 @@ class Cache:
 
     def close(self) -> None:
         with closing(self._connection):
-            self._connection.commit()
+            self.commit()
 
     def __enter__(self) -> Cache:
         return self
@@ -122,10 +122,19 @@ class Cache:
         A stale entry is withheld unless ``allow_stale`` is set, so the normal path
         refetches while the failure path can still fall back to it.
         """
-        row = self._connection.execute(
-            "SELECT payload, fetched_at FROM entries WHERE namespace = ? AND key = ?",
-            (namespace, key),
-        ).fetchone()
+        try:
+            row = self._connection.execute(
+                "SELECT payload, fetched_at FROM entries "
+                "WHERE namespace = ? AND key = ?",
+                (namespace, key),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            # A corrupt or locked cache must degrade to a miss. Letting it raise
+            # would turn a performance problem into a failed scan.
+            logger.warning("could not read cache entry %s:%s: %s", namespace, key, exc)
+            self.misses += 1
+            return None
+
         if row is None:
             self.misses += 1
             return None
@@ -162,14 +171,22 @@ class Cache:
             logger.warning("could not write cache entry %s:%s: %s", namespace, key, exc)
 
     def commit(self) -> None:
-        self._connection.commit()
+        try:
+            self._connection.commit()
+        except sqlite3.Error as exc:
+            # Same rule as ``set``: a full disk costs us the cache, not the scan.
+            logger.warning("could not commit cache: %s", exc)
 
     # -- maintenance -------------------------------------------------------
+    #
+    # Unlike the read/write path these back user-facing ``cache`` commands, where a
+    # failure is the whole point of the command and must be reported rather than
+    # logged and swallowed.
 
     def stats(self) -> Iterator[tuple[str, int, int]]:
         """Yield ``(namespace, entries, stale)`` for the ``cache info`` command."""
         now = int(time.time())
-        rows = self._connection.execute(
+        rows = self._query(
             "SELECT namespace, COUNT(*), MIN(fetched_at) FROM entries "
             "GROUP BY namespace"
         ).fetchall()
@@ -177,7 +194,7 @@ class Cache:
             ttl = NAMESPACE_TTL.get(namespace)
             stale = 0
             if ttl is not None:
-                stale = self._connection.execute(
+                stale = self._query(
                     "SELECT COUNT(*) FROM entries "
                     "WHERE namespace = ? AND fetched_at < ?",
                     (namespace, now - ttl),
@@ -192,15 +209,22 @@ class Cache:
         for namespace, ttl in NAMESPACE_TTL.items():
             if ttl is None:
                 continue
-            cursor = self._connection.execute(
+            cursor = self._query(
                 "DELETE FROM entries WHERE namespace = ? AND fetched_at < ?",
                 (namespace, now - ttl),
             )
             removed += cursor.rowcount
-        self._connection.commit()
+        self.commit()
         return removed
 
     def clear(self) -> int:
-        cursor = self._connection.execute("DELETE FROM entries")
-        self._connection.commit()
+        cursor = self._query("DELETE FROM entries")
+        self.commit()
         return int(cursor.rowcount)
+
+    def _query(self, sql: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        """Run a maintenance statement, reporting failure as a :class:`CacheError`."""
+        try:
+            return self._connection.execute(sql, parameters)
+        except sqlite3.Error as exc:
+            raise CacheError(f"cache query failed: {exc}") from exc

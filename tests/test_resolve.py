@@ -334,6 +334,30 @@ async def test_unresolvable_constraint_stays_unresolved_and_is_counted() -> None
     assert result.unresolved == 1
 
 
+async def test_unresolved_counts_constraints_not_declarations() -> None:
+    """The count feeds a user-facing warning, so it has to mean something.
+
+    ``resolved`` counted distinct constraints while ``unresolved`` counted every
+    declaration, so one unresolvable package declared across a monorepo's six
+    manifests was reported as six separate failures.
+    """
+    result = await resolver_for({}).resolve(
+        (
+            unpinned("flask", ">=2.0"),
+            unpinned("flask", ">=2.0"),
+            unpinned("flask", ">=2.0"),
+        )
+    )
+    assert result.unresolved == 1
+
+
+async def test_distinct_constraints_on_one_package_are_counted_separately() -> None:
+    result = await resolver_for({}).resolve(
+        (unpinned("flask", ">=2.0"), unpinned("flask", ">=3.0"))
+    )
+    assert result.unresolved == 2
+
+
 async def test_resolver_queries_each_package_once() -> None:
     url = version_list_url(PYPI, "flask")
     assert url is not None

@@ -18,6 +18,7 @@ from icebergsca.core.models import (
     SourceLocation,
 )
 from icebergsca.ecosystems.maven import MavenResolver, parse_manifest
+from icebergsca.ecosystems.maven.model import Coordinate
 from icebergsca.ecosystems.maven.parser import interpolate, parse_pom
 from icebergsca.ecosystems.maven.resolver import CENTRAL
 from tests.conftest import FIXTURES, MockTransport
@@ -392,3 +393,57 @@ async def test_non_maven_dependencies_pass_through_untouched() -> None:
     result = await resolver({}).expand((pypi,))
     assert result.dependencies == (pypi,)
     assert result.approximate is False
+
+
+async def test_an_implausible_coordinate_is_refused_rather_than_fetched() -> None:
+    """Coordinates come out of POM files in the repository being scanned.
+
+    Interpolated into a Central path unchecked, a groupId containing whitespace made
+    httpx raise ``InvalidURL`` — which is not an ``HTTPError``, so it escaped the
+    handler and ended the whole scan. A component of ``..`` would traverse instead.
+    """
+    transport = MockTransport({})
+    resolved = MavenResolver(httpx.AsyncClient(transport=transport), Cache.memory())
+
+    assert await resolved._fetch_pom(Coordinate("gro up\n", "artifact", "1.0")) is None
+    assert await resolved._fetch_pom(Coordinate("g", "..", "1.0")) is None
+    assert await resolved._fetch_pom(Coordinate("g", "a", "../../secret")) is None
+    assert transport.calls == []
+
+
+async def test_a_bom_may_supply_the_scope_as_well_as_the_version() -> None:
+    """A dependency declaring no scope takes the managed one.
+
+    Reading the declared scope alone treated every such entry as ``compile``, so a
+    test-scoped family pinned by a BOM propagated as if it shipped.
+    """
+    responses = {
+        f"GET:{pom_url('g', 'a', '1.0')}": pom_xml(
+            "g",
+            "a",
+            "1.0",
+            management=(
+                "<dependency><groupId>g</groupId><artifactId>b</artifactId>"
+                "<version>2.0</version><scope>test</scope></dependency>"
+            ),
+            dependencies=dep_xml("g", "b"),
+        ),
+        f"GET:{pom_url('g', 'b', '2.0')}": pom_xml("g", "b", "2.0"),
+    }
+    result = await resolver(responses).expand((direct("g:a", "1.0"),))
+    assert "g:b" not in {dep.ref.name for dep in result.dependencies}
+
+    # The same graph without the managed scope must still pull g:b in, so the
+    # assertion above cannot pass merely because the version went missing.
+    responses[f"GET:{pom_url('g', 'a', '1.0')}"] = pom_xml(
+        "g",
+        "a",
+        "1.0",
+        management=(
+            "<dependency><groupId>g</groupId><artifactId>b</artifactId>"
+            "<version>2.0</version></dependency>"
+        ),
+        dependencies=dep_xml("g", "b"),
+    )
+    unmanaged = await resolver(responses).expand((direct("g:a", "1.0"),))
+    assert "g:b" in {dep.ref.name for dep in unmanaged.dependencies}

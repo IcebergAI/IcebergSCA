@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from icebergsca.core.models import (
     SourceLocation,
 )
 from icebergsca.ecosystems.maven.model import (
+    DEFAULT_SCOPE,
     NON_TRANSITIVE_SCOPES,
     Coordinate,
     Pom,
@@ -66,6 +68,13 @@ MAX_NODES = 500
 MAX_PARENT_DEPTH = 10
 
 _TIMEOUT = 15.0
+
+#: What a coordinate component may contain before it is interpolated into a Central
+#: URL. Coordinates come out of POM files inside a scanned repository — untrusted
+#: input — and Maven's own rules are far narrower than "any string", so anything
+#: outside this is refused rather than escaped. ``.`` matters especially: group
+#: separators become path separators, so a component of ``..`` would traverse.
+_VALID_COMPONENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +178,7 @@ class MavenResolver:
                 pom = parse_pom(
                     path.read_text(encoding="utf-8", errors="replace"), source=str(path)
                 )
-            except (OSError, Exception) as exc:  # noqa: BLE001 — never fail the scan
+            except Exception as exc:  # noqa: BLE001 — never fail the scan
                 logger.debug("could not re-read %s: %s", path, exc)
                 continue
 
@@ -284,12 +293,19 @@ class MavenResolver:
         children: list[tuple[RawDependency, str | None, Scope]] = []
 
         for entry in pom.dependencies:
-            if entry.optional or entry.scope.lower() in NON_TRANSITIVE_SCOPES:
+            if entry.optional:
                 continue
 
             group = interpolate(entry.group, pom.properties) or entry.group
             artifact = interpolate(entry.artifact, pom.properties) or entry.artifact
             key = f"{group}:{artifact}"
+
+            # A dependency that declares no scope takes the one dependencyManagement
+            # gives it, which is how a BOM pins a whole family to ``test``. Reading
+            # the declared scope only would treat every such entry as ``compile``.
+            scope_name = entry.scope or pom.managed_scopes.get(key) or DEFAULT_SCOPE
+            if scope_name.lower() in NON_TRANSITIVE_SCOPES:
+                continue
 
             version = interpolate(entry.version, pom.properties)
             if not version or has_unresolved_property(version):
@@ -301,8 +317,7 @@ class MavenResolver:
             if version and version.startswith(("[", "(")):
                 version = None
 
-            scope_name = entry.scope if entry.scope else pom.managed_scopes.get(key, "")
-            scope = maven_scope(scope_name) if scope_name else Scope.RUNTIME
+            scope = maven_scope(scope_name)
             # A dependency of a build-scoped dependency is itself build-scoped.
             if parent_scope is not Scope.RUNTIME:
                 scope = parent_scope
@@ -401,6 +416,9 @@ class MavenResolver:
         """
         if not coordinate.version or not coordinate.group or not coordinate.artifact:
             return None
+        if not _is_fetchable(coordinate):
+            logger.debug("refusing to fetch implausible coordinate %s", coordinate)
+            return None
 
         key = str(coordinate)
         cached = self._cache.get("maven_pom", key)
@@ -419,7 +437,10 @@ class MavenResolver:
         async with self._semaphore:
             try:
                 response = await self._client.get(url, timeout=_TIMEOUT)
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, httpx.InvalidURL) as exc:
+                # InvalidURL is not an HTTPError. Left uncaught it escapes the whole
+                # resolver — including the BOM path, which no gather() shields — and
+                # ends a scan over one odd coordinate in one file.
                 self._warnings.append(f"could not fetch POM for {coordinate}: {exc}")
                 return None
 
@@ -442,3 +463,15 @@ class MavenResolver:
         except Exception as exc:  # noqa: BLE001 — a bad POM must not end the scan
             logger.debug("unparseable POM %s: %s", source, exc)
             return None
+
+
+def _is_fetchable(coordinate: Coordinate) -> bool:
+    """True when a coordinate is safe to turn into a Maven Central path."""
+    return all(
+        _VALID_COMPONENT.match(component)
+        for component in (
+            coordinate.group,
+            coordinate.artifact,
+            coordinate.version or "",
+        )
+    )

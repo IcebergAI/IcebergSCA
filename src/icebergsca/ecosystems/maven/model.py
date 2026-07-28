@@ -42,7 +42,10 @@ class RawDependency:
     group: str
     artifact: str
     version: str | None = None
-    scope: str = DEFAULT_SCOPE
+    #: Exactly what the element declared — empty when it declared nothing, which is
+    #: not the same as declaring ``compile``. A dependencyManagement entry can supply
+    #: the scope for an undeclared one, and collapsing the two here would hide that.
+    scope: str = ""
     optional: bool = False
     #: ``group:artifact`` keys this dependency must not drag in, from ``<exclusions>``.
     exclusions: frozenset[str] = field(default_factory=frozenset)

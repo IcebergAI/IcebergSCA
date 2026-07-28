@@ -172,7 +172,7 @@ def _dependencies(container: Element | None) -> tuple[RawDependency, ...]:
                 group=_text(element, "groupId"),
                 artifact=_text(element, "artifactId"),
                 version=_text(element, "version") or None,
-                scope=_text(element, "scope") or DEFAULT_SCOPE,
+                scope=_text(element, "scope"),
                 optional=_text(element, "optional").lower() == "true",
                 exclusions=exclusions,
                 is_import=_text(element, "type").lower() == "import"
@@ -254,7 +254,7 @@ def _parse_pom_manifest(path: Path, content: str) -> list[Dependency]:
         dependencies.append(
             Dependency(
                 ref=PackageRef(EcosystemId.MAVEN, f"{group}:{artifact}", usable),
-                scope=maven_scope(entry.scope),
+                scope=maven_scope(entry.scope or DEFAULT_SCOPE),
                 direct=True,
                 source=SourceLocation(path, _find_line(content, artifact)),
                 pin=Pin.PINNED if usable else Pin.UNRESOLVED,

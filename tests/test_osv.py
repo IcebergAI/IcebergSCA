@@ -324,6 +324,46 @@ async def test_offline_mode_makes_no_requests() -> None:
     assert any("offline" in w for w in result.warnings)
 
 
+async def test_short_batch_response_leaves_the_tail_unchecked() -> None:
+    """OSV answering fewer queries than we sent must not read as "nothing found".
+
+    Results are positional, so a short array used to be padded with empty advisory
+    lists. That padding is indistinguishable from a genuine all-clear, and it was
+    cached under that meaning for a day.
+    """
+    client, _, _ = make_client({f"POST:{QUERYBATCH_URL}": {"results": [{"vulns": []}]}})
+    result = await client.scan([REQUESTS, FLASK])
+
+    assert result.failed == (FLASK,)
+    assert REQUESTS not in result.failed
+    assert any("unchecked" in warning for warning in result.warnings)
+
+
+async def test_an_unanswered_query_is_not_cached_as_clean() -> None:
+    client, _, cache = make_client(
+        {f"POST:{QUERYBATCH_URL}": {"results": [{"vulns": []}]}}
+    )
+    await client.scan([REQUESTS, FLASK])
+
+    assert cache.get("osv_query", "PyPI:requests:2.19.1") is not None
+    assert cache.get("osv_query", "PyPI:flask:3.0.0", allow_stale=True) is None
+
+
+async def test_extra_results_are_discarded_rather_than_misattributed() -> None:
+    """A longer array than we asked for cannot be aligned to a package."""
+    client, _, _ = make_client(
+        {
+            f"POST:{QUERYBATCH_URL}": {
+                "results": [{"vulns": []}, {"vulns": []}, {"vulns": []}]
+            }
+        }
+    )
+    result = await client.scan([REQUESTS])
+
+    assert result.failed == ()
+    assert any("more results than queries" in w for w in result.warnings)
+
+
 async def test_pagination_is_disclosed_rather_than_silently_truncated() -> None:
     client, _, _ = make_client(
         {
