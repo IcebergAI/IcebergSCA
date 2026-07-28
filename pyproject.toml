@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "icebergsca"
 version = "0.1.0"
-description = "Supply chain analysis for software projects — lockfile-first dependency scanning against OSV"
+description = "Software composition analysis for software projects — lockfile-first dependency scanning against OSV"
 readme = "README.md"
 requires-python = ">=3.11"
 # PEP 639: an SPDX expression plus the files to bundle. A "License ::" classifier
@@ -13,7 +13,17 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Richard Hope" }]
-keywords = ["sca", "supply-chain", "security", "osv", "sbom", "cyclonedx", "vulnerabilities"]
+keywords = [
+    "sca",
+    "software-composition-analysis",
+    "dependency-scanning",
+    "supply-chain",
+    "security",
+    "osv",
+    "sbom",
+    "cyclonedx",
+    "vulnerabilities",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

@@ -28,7 +28,7 @@ Notes:
   captures in `../docs/img/`. Regenerate those first, then re-copy.
 - Nothing is loaded from a CDN: fonts are self-hosted (`font = false` disables
   Google Fonts) and the mermaid fence is configured but deliberately unused,
-  since the theme lazy-loads mermaid from unpkg. A supply chain scanner's own
-  site should not quietly take a third-party runtime dependency.
+  since the theme lazy-loads mermaid from unpkg. The site for a dependency
+  scanner should not quietly take a third-party runtime dependency.
 - `docs/stylesheets/iceberg.css` carries the family design tokens verbatim from
   the Iceberg (CTI) sheet. Edit them there first, then copy across.

@@ -6,8 +6,8 @@ the same idea — a set of lower and upper bounds — behind different syntax. E
 ecosystem's job is reduced to expanding its own shorthand (``^``, ``~>``, ``[1.0,2.0)``)
 into those bounds.
 
-Implemented here rather than pulled in from a semver package: this is a supply chain
-tool, and every dependency it takes on is one more thing its own users have to trust.
+Implemented here rather than pulled in from a semver package: every dependency this
+tool takes on is one more thing its own users have to trust.
 
 Every entry point can return ``None``, meaning "this syntax is beyond us". That is
 deliberately distinct from "nothing matched" — the caller marks such dependencies

@@ -109,7 +109,7 @@ one as evidence that anything was checked.
 | `2` | Usage error: bad flag, unknown format (Click's reserved code) | Fix the invocation |
 
 Findings deliberately never change the exit code. A scanner that exits non-zero
-on findings gets `|| true` appended within a week, at which point genuine tool
+on findings sooner or later gets `|| true` appended, at which point genuine tool
 failures go unnoticed too.
 
 !!! note "Exit 2 is usage, exit 1 is scan failure"
@@ -134,7 +134,7 @@ jq -e '(.summary.by_severity.critical // 0) == 0' report.json > /dev/null \
 ## A full workflow
 
 ```yaml
-name: Supply chain
+name: Dependency scan
 
 on:
   push: { branches: [main] }
@@ -165,11 +165,11 @@ jobs:
           category: icebergsca
 ```
 
-The scheduled run matters more than it looks: most new findings arrive because
-an advisory was published, not because the code changed.
+The scheduled run matters: most new findings arrive because an advisory was
+published, not because the code changed.
 
 Deliberately vulnerable test fixtures are a common source of noise — exclude
-them, rather than explaining them away every week.
+them rather than explaining them away.
 
 ### Caching between runs
 

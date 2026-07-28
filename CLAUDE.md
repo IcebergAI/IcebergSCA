@@ -1,7 +1,7 @@
 # IcebergSCA — maintenance notes
 
-CLI for supply chain analysis: walk a project, find manifests and lockfiles, resolve the
-dependency graph, check every package against OSV, report it.
+CLI for software composition analysis: walk a project, find manifests and lockfiles, resolve
+the dependency graph, check every package against OSV, report it.
 
 ## Commands
 
@@ -126,7 +126,7 @@ project's build to discover its dependencies is itself a supply chain risk.
 `MavenResolver._backfill` re-reads `pom.xml` to apply BOM-supplied versions to direct dependencies,
 which the synchronous parser cannot do because BOMs live on Central.
 
-**Ranges, SARIF and CycloneDX are hand-written** rather than pulled from packages — a supply chain
+**Ranges, SARIF and CycloneDX are hand-written** rather than pulled from packages — a dependency
 scanner with a large dependency tree of its own is a poor advertisement. Correctness is held by
 schema validation in `tests/test_report_formats.py` against the official schemas in `tests/schemas/`.
 

@@ -55,7 +55,7 @@ Notes on the SARIF we emit:
 ## Full workflow
 
 ```yaml
-name: Supply chain
+name: Dependency scan
 
 on:
   push: { branches: [main] }
@@ -86,8 +86,8 @@ jobs:
           category: icebergsca
 ```
 
-The scheduled run matters more than it looks: most new findings arrive because an advisory was
-published, not because the code changed.
+The scheduled run matters: most new findings arrive because an advisory was published, not
+because the code changed.
 
 ## SBOM artefacts
 

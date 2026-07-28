@@ -362,7 +362,7 @@ class Finding:
 class SkippedFile:
     """A file we recognised but did not scan, and why.
 
-    Skips are always reported. A supply chain tool that quietly drops a manifest is
+    Skips are always reported. A scanner that quietly drops a manifest is
     indistinguishable from one that found nothing wrong with it.
     """
 
