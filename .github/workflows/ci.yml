@@ -8,11 +8,20 @@ on:
 permissions:
   contents: read
 
+# A second push to a branch makes the first run's answer irrelevant, and the
+# self-scan job talks to the live OSV API — no reason to ask it twice. Runs on
+# main are never cancelled, so the default branch keeps a complete history.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
@@ -23,6 +32,12 @@ jobs:
         run: uv run ruff format --check .
       - name: Mypy
         run: uv run mypy
+      # Our own CI is part of our supply chain, and a workflow is the one place
+      # in this repository that runs with a token. Pinned like everything else:
+      # an unpinned audit tool can start failing the build on a release we never
+      # chose to take.
+      - name: Zizmor
+        run: uvx zizmor@1.28.0 --no-online-audits .github/
 
   test:
     runs-on: ubuntu-latest
@@ -32,6 +47,8 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
@@ -42,6 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Build wheel and sdist
         run: uv build
@@ -70,9 +89,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      # A fork PR gets a read-only token regardless, so the upload fails there
+      # rather than granting anything.
+      security-events: write # required by upload-sarif, below
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
