@@ -78,9 +78,10 @@ toggle.name = "Switch to light mode"
 icon = "fontawesome/brands/github"
 link = "https://github.com/IcebergAI/IcebergSCA"
 
-[[project.extra.social]]
-icon = "fontawesome/brands/python"
-link = "https://pypi.org/project/icebergsca/"
+# A PyPI social link belongs here too, but icebergsca has no release yet
+# (pypi.org/pypi/icebergsca/json is a 404) and a footer icon that 404s is
+# exactly the kind of unearned claim this tool exists to complain about.
+# Restore it with the first release.
 
 # ----------------------------------------------------------------------------
 # Markdown extensions (carried over from the Zensical default template)
