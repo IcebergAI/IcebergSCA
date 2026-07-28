@@ -66,7 +66,9 @@ The complete field reference ships with the package, in
 ## SARIF and GitHub code scanning
 
 ```yaml
-- run: uvx icebergsca scan . --format sarif --output icebergsca.sarif
+- run: >-
+    uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+    icebergsca scan . --format sarif --output icebergsca.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: icebergsca.sarif
@@ -156,7 +158,9 @@ jobs:
       - uses: astral-sh/setup-uv@v8
 
       - name: Scan
-        run: uvx icebergsca scan . --exclude 'tests/fixtures/**' --format sarif --output sca.sarif
+        run: >-
+          uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+          icebergsca scan . --exclude 'tests/fixtures/**' --format sarif --output sca.sarif
 
       - uses: github/codeql-action/upload-sarif@v3
         if: always()

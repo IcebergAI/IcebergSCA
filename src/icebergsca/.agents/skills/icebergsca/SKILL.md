@@ -25,11 +25,18 @@ dependency graph, checks each package against [OSV](https://osv.dev), and report
 icebergsca scan ./myproject
 ```
 
-The tool is a CLI application, not a library. Install it as a tool, not as a dependency:
+The tool is a CLI application, not a library. Install it as a tool, not as a dependency. It is
+released from its GitHub repository; there is **no `icebergsca` package on PyPI**, so
+`pip install icebergsca` does not install this project.
 
 ```bash
-uv tool install icebergsca      # or run ad hoc: uvx icebergsca scan .
+uv tool install git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+
+# or run ad hoc, without installing
+uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0 icebergsca scan .
 ```
+
+Pin the tag. Without `@v0.1.0` you get whatever `main` is at that moment.
 
 ## Machine-readable output
 

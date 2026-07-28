@@ -29,14 +29,27 @@ check.
 ## Install and scan
 
 ```bash
-uv tool install icebergsca      # or run it ad hoc: uvx icebergsca scan .
-pipx install icebergsca
+uv tool install git+https://github.com/IcebergAI/IcebergSCA@v0.1.0
+pipx install git+https://github.com/IcebergAI/IcebergSCA.git@v0.1.0
 
-icebergsca scan ./myproject
+# or run it without installing
+uvx --from git+https://github.com/IcebergAI/IcebergSCA@v0.1.0 icebergsca scan .
 ```
 
 It is a CLI application, not a library — install it as a tool rather than adding
-it to the dependency tree it is meant to be auditing.
+it to the dependency tree it is meant to be auditing. Then point it at a project:
+
+```bash
+icebergsca scan ./myproject
+```
+
+!!! info "Released from the repository, not from PyPI"
+
+    There is no `icebergsca` package on PyPI, and anything published under that
+    name is not this project.
+
+    Pin the tag: without `@v0.1.0` you get whatever `main` is at that moment.
+    Upgrade by re-running the same command against a newer tag with `--force`.
 
 ![A scan reporting 12 vulnerabilities across three Python packages](assets/scan-table.svg){ .term }
 
