@@ -35,8 +35,9 @@ class ExitCode(IntEnum):
     vulnerabilities has done its job and exits :attr:`OK`; severity gating arrives
     later as an explicit ``--fail-on`` flag.
 
-    :attr:`USAGE` is 2 rather than 1 because Click reserves that code for usage
-    errors, and remapping it would mean overriding framework internals for nothing.
+    :attr:`USAGE` is 2 rather than 1 because Typer's vendored Click reserves that
+    code for usage errors, and remapping it would mean overriding framework
+    internals for nothing.
     """
 
     OK = 0
@@ -51,6 +52,9 @@ app = typer.Typer(
     help="Software composition analysis: find dependencies, check them against OSV.",
     no_args_is_help=True,
     add_completion=False,
+    # Stated rather than left to the default so that help output does not change
+    # shape depending on what else happens to be installed.
+    rich_markup_mode="rich",
 )
 
 logger = logging.getLogger("icebergsca")
@@ -77,22 +81,34 @@ def _configure_logging(verbosity: int, quiet: bool) -> None:
     )
 
 
-def _parse_csv_option(
-    value: str | None, name: str, choices: type[EnumT]
+def _choices_metavar(choices: type[EnumT]) -> str:
+    """Render an enum the way Typer renders one it converts itself."""
+    return f"<{'|'.join(member.value for member in choices)}>"
+
+
+def _parse_enum_option(
+    values: list[str] | None, name: str, choices: type[EnumT]
 ) -> list[EnumT] | None:
-    """Split a comma-separated flag into enum members, reporting bad values clearly."""
-    if not value:
+    """Resolve a repeatable, comma-separated flag into enum members.
+
+    Both ``--scope runtime,dev`` and ``--scope runtime --scope dev`` are accepted.
+    Typer would convert a ``list[Scope]`` on its own, but not split on commas, and
+    the comma form is the one the documentation has always shown.
+    """
+    if not values:
         return None
     parsed: list[EnumT] = []
     valid = {member.value for member in choices}
-    for item in (part.strip() for part in value.split(",")):
+    for item in (part.strip() for value in values for part in value.split(",")):
         if not item:
             continue
         if item not in valid:
             raise typer.BadParameter(
                 f"unknown {name} '{item}' — choose from: {', '.join(sorted(valid))}"
             )
-        parsed.append(choices(item))
+        member = choices(item)
+        if member not in parsed:
+            parsed.append(member)
     return parsed or None
 
 
@@ -142,15 +158,21 @@ def scan_command(
         ),
     ] = False,
     scopes: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--scope",
-            help="Comma-separated scopes to include, overriding --include-dev.",
+            metavar=_choices_metavar(Scope),
+            help="Scope to include, overriding --include-dev. "
+            "Repeatable, or comma-separated.",
         ),
     ] = None,
     ecosystems: Annotated[
-        str | None,
-        typer.Option("--ecosystem", help="Comma-separated ecosystems to restrict to."),
+        list[str] | None,
+        typer.Option(
+            "--ecosystem",
+            metavar=_choices_metavar(EcosystemId),
+            help="Ecosystem to restrict to. Repeatable, or comma-separated.",
+        ),
     ] = None,
     exclude: Annotated[
         list[str] | None,
@@ -202,8 +224,8 @@ def scan_command(
     """Scan a project for dependencies and known vulnerabilities."""
     _configure_logging(verbose, quiet)
 
-    selected_scopes = _parse_csv_option(scopes, "scope", Scope)
-    selected_ecosystems = _parse_csv_option(ecosystems, "ecosystem", EcosystemId)
+    selected_scopes = _parse_enum_option(scopes, "scope", Scope)
+    selected_ecosystems = _parse_enum_option(ecosystems, "ecosystem", EcosystemId)
 
     if selected_scopes is not None:
         scope_set = frozenset(selected_scopes)
@@ -297,13 +319,17 @@ def sbom_command(
             "and no network calls to OSV.",
         ),
     ] = False,
-    verbose: Annotated[int, typer.Option("-v", "--verbose", count=True)] = 0,
-    quiet: Annotated[bool, typer.Option("-q", "--quiet")] = False,
+    verbose: Annotated[
+        int, typer.Option("-v", "--verbose", count=True, help="Increase log verbosity.")
+    ] = 0,
+    quiet: Annotated[
+        bool, typer.Option("-q", "--quiet", help="Only log errors.")
+    ] = False,
 ) -> None:
     """Emit a CycloneDX 1.6 SBOM.
 
-    Equivalent to ``scan --format cyclonedx``, except that it defaults to components
-    only — an SBOM is often wanted for inventory rather than for findings.
+    Equivalent to [bold]scan --format cyclonedx[/bold], except that it defaults to
+    components only — an SBOM is often wanted for inventory rather than for findings.
     """
     _configure_logging(verbose, quiet)
 
@@ -340,7 +366,10 @@ def sbom_command(
 # cache
 # ---------------------------------------------------------------------------
 
-cache_app = typer.Typer(help="Inspect and manage the on-disk OSV cache.")
+cache_app = typer.Typer(
+    help="Inspect and manage the on-disk OSV cache.",
+    no_args_is_help=True,
+)
 app.add_typer(cache_app, name="cache")
 
 

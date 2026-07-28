@@ -170,6 +170,9 @@ icebergsca scan . --include-dev        # everything
 icebergsca scan . --scope runtime      # only what ships
 ```
 
+`--scope` and `--ecosystem` are repeatable as well as comma-separated:
+`--scope runtime --scope build` and `--scope runtime,build` are the same request.
+
 ## Narrowing a scan
 
 ```bash

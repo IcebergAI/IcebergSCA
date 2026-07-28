@@ -99,6 +99,29 @@ def test_ecosystem_filter(tmp_path: Path) -> None:
     assert {m["ecosystem"] for m in document["manifests"]} == {"PyPI"}
 
 
+def test_scope_flag_is_repeatable_as_well_as_comma_separated(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "1"\ndependencies = ["httpx>=0.27"]\n\n'
+        '[project.optional-dependencies]\ndev = ["ruff>=0.9"]\n'
+    )
+    argv = ["scan", str(tmp_path), "--format", "json"]
+    repeated = runner.invoke(app, [*argv, "--scope", "runtime", "--scope", "dev"])
+    comma = runner.invoke(app, [*argv, "--scope", "runtime,dev"])
+    for result in (repeated, comma):
+        names = {
+            e["package"]["name"] for e in json.loads(result.stdout)["dependencies"]
+        }
+        assert names == {"httpx", "ruff"}
+
+
+def test_enum_choices_are_listed_in_help() -> None:
+    """A bare ``<str>`` metavar tells a reader nothing about what is accepted."""
+    # Wide enough that Rich does not wrap the metavar column mid-value.
+    result = runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
+    assert "<pypi|npm|maven|go|cargo|nuget|rubygems>" in result.stdout
+    assert "<runtime|dev|test|build|optional>" in result.stdout
+
+
 def test_exclude_glob(tmp_path: Path) -> None:
     project(tmp_path)
     (tmp_path / "sub").mkdir()
