@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import IntEnum
 from pathlib import Path
-from typing import Annotated, NoReturn, TypeVar
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -59,8 +59,6 @@ app = typer.Typer(
 
 logger = logging.getLogger("icebergsca")
 
-EnumT = TypeVar("EnumT", Scope, EcosystemId)
-
 
 def _fail(message: str) -> NoReturn:
     typer.secho(f"error: {message}", fg=typer.colors.RED, err=True)
@@ -79,37 +77,6 @@ def _configure_logging(verbosity: int, quiet: bool) -> None:
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
-
-
-def _choices_metavar(choices: type[EnumT]) -> str:
-    """Render an enum the way Typer renders one it converts itself."""
-    return f"<{'|'.join(member.value for member in choices)}>"
-
-
-def _parse_enum_option(
-    values: list[str] | None, name: str, choices: type[EnumT]
-) -> list[EnumT] | None:
-    """Resolve a repeatable, comma-separated flag into enum members.
-
-    Both ``--scope runtime,dev`` and ``--scope runtime --scope dev`` are accepted.
-    Typer would convert a ``list[Scope]`` on its own, but not split on commas, and
-    the comma form is the one the documentation has always shown.
-    """
-    if not values:
-        return None
-    parsed: list[EnumT] = []
-    valid = {member.value for member in choices}
-    for item in (part.strip() for value in values for part in value.split(",")):
-        if not item:
-            continue
-        if item not in valid:
-            raise typer.BadParameter(
-                f"unknown {name} '{item}' — choose from: {', '.join(sorted(valid))}"
-            )
-        member = choices(item)
-        if member not in parsed:
-            parsed.append(member)
-    return parsed or None
 
 
 def _version_callback(value: bool) -> None:
@@ -158,21 +125,15 @@ def scan_command(
         ),
     ] = False,
     scopes: Annotated[
-        list[str] | None,
+        list[Scope] | None,
         typer.Option(
             "--scope",
-            metavar=_choices_metavar(Scope),
-            help="Scope to include, overriding --include-dev. "
-            "Repeatable, or comma-separated.",
+            help="Scope to include, overriding --include-dev. Repeatable.",
         ),
     ] = None,
     ecosystems: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--ecosystem",
-            metavar=_choices_metavar(EcosystemId),
-            help="Ecosystem to restrict to. Repeatable, or comma-separated.",
-        ),
+        list[EcosystemId] | None,
+        typer.Option("--ecosystem", help="Ecosystem to restrict to. Repeatable."),
     ] = None,
     exclude: Annotated[
         list[str] | None,
@@ -224,11 +185,8 @@ def scan_command(
     """Scan a project for dependencies and known vulnerabilities."""
     _configure_logging(verbose, quiet)
 
-    selected_scopes = _parse_enum_option(scopes, "scope", Scope)
-    selected_ecosystems = _parse_enum_option(ecosystems, "ecosystem", EcosystemId)
-
-    if selected_scopes is not None:
-        scope_set = frozenset(selected_scopes)
+    if scopes:
+        scope_set = frozenset(scopes)
     elif include_dev:
         scope_set = frozenset(Scope)
     else:
@@ -242,7 +200,7 @@ def scan_command(
             exclude=tuple(exclude or ()),
             max_depth=max_depth,
             follow_symlinks=follow_symlinks,
-            ecosystems=frozenset(selected_ecosystems) if selected_ecosystems else None,
+            ecosystems=frozenset(ecosystems) if ecosystems else None,
         ),
         scopes=scope_set,
         offline=offline,

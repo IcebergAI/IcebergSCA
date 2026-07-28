@@ -170,15 +170,15 @@ icebergsca scan . --include-dev        # everything
 icebergsca scan . --scope runtime      # only what ships
 ```
 
-`--scope` and `--ecosystem` are repeatable as well as comma-separated:
-`--scope runtime --scope build` and `--scope runtime,build` are the same request.
+`--scope` and `--ecosystem` take one value each and are repeated to widen the
+selection: `--scope runtime --scope build`.
 
 ## Narrowing a scan
 
 ```bash
-icebergsca scan . --ecosystem pypi,npm          # restrict ecosystems
-icebergsca scan . --exclude 'tests/fixtures/**' # skip paths
-icebergsca scan ./requirements.txt              # a single file
+icebergsca scan . --ecosystem pypi --ecosystem npm  # restrict ecosystems
+icebergsca scan . --exclude 'tests/fixtures/**'     # skip paths
+icebergsca scan ./requirements.txt                  # a single file
 ```
 
 Deliberately vulnerable test fixtures are a common source of noise. Exclude them rather than

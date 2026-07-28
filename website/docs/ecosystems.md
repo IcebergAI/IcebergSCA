@@ -18,10 +18,10 @@ filename, so a file only has to be where a build tool would put it.
 | .NET | `nuget` | `*.csproj`, `packages.config` | `packages.lock.json` | yes |
 | Ruby | `rubygems` | `Gemfile`, `*.gemspec` | `Gemfile.lock` | yes |
 
-Restrict a scan with a comma-separated list:
+Restrict a scan by repeating the flag:
 
 ```bash
-icebergsca scan . --ecosystem pypi,npm
+icebergsca scan . --ecosystem pypi --ecosystem npm
 ```
 
 !!! note "Three vocabularies that genuinely disagree"

@@ -25,15 +25,15 @@ icebergsca scan <path>
 
 | Flag | Effect |
 |---|---|
-| `--ecosystem <list>` | Ecosystems to restrict to: `pypi`, `npm`, `maven`, `go`, `cargo`, `nuget`, `rubygems`. Repeatable, or comma-separated |
+| `--ecosystem <name>` | Ecosystem to restrict to: `pypi`, `npm`, `maven`, `go`, `cargo`, `nuget`, `rubygems`. Repeatable |
 | `--exclude <glob>` | Glob to skip. Repeatable |
 | `--max-depth <n>` | Maximum directory depth to walk |
 | `--follow-symlinks` | Follow symlinked directories |
 | `--include-dev` | Include dev and test dependencies, which are excluded by default |
-| `--scope <list>` | Scopes to include, overriding `--include-dev`: `runtime`, `dev`, `test`, `build`, `optional`. Repeatable, or comma-separated |
+| `--scope <name>` | Scope to include, overriding `--include-dev`: `runtime`, `dev`, `test`, `build`, `optional`. Repeatable |
 
 ```bash
-icebergsca scan . --ecosystem pypi,npm --exclude 'tests/fixtures/**'
+icebergsca scan . --ecosystem pypi --ecosystem npm --exclude 'tests/fixtures/**'
 icebergsca scan . --scope runtime            # only what ships
 icebergsca scan ./requirements.txt           # a single file
 ```
