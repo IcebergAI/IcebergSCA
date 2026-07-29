@@ -181,6 +181,23 @@ def _help_markdown(finding: Finding) -> str:
 
 
 def _result(finding: Finding) -> dict[str, Any]:
+    result = _base_result(finding)
+    if finding.suppression is not None:
+        # SARIF's own slot for this. Kept in ``results`` rather than filtered out, so
+        # GitHub renders the alert as dismissed rather than closing it as fixed — and
+        # so the rule it points at survives, since the rule list is derived from the
+        # same findings.
+        result["suppressions"] = [
+            {
+                "kind": "external",
+                "status": "accepted",
+                "justification": finding.suppression.reason,
+            }
+        ]
+    return result
+
+
+def _base_result(finding: Finding) -> dict[str, Any]:
     return {
         "ruleId": _rule_id(finding),
         "level": _LEVEL[finding.level],

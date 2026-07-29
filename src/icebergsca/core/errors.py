@@ -56,3 +56,20 @@ class UpstreamError(IcebergSCAError):
 
 class CacheError(IcebergSCAError):
     """The on-disk cache could not be opened or written."""
+
+
+class ConfigError(IcebergSCAError):
+    """The user's own configuration file is malformed.
+
+    Deliberately strict, unlike the parsers: a third-party manifest we did not write
+    gets the benefit of the doubt and anything unrecognised is skipped, because the
+    alternative is refusing to scan a project over a field we never needed. An ignore
+    file is the opposite case. It exists to *remove* findings, so a mistyped key that
+    silently suppresses nothing — or everything — is precisely the failure this tool
+    must not have. Say so and stop.
+    """
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"{path}: {reason}")
+        self.path = path
+        self.reason = reason

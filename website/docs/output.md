@@ -29,16 +29,17 @@ icebergsca scan . --format json --output report.json
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "tool": { "name": "icebergsca", "version": "0.1.0" },
   "scan": { "root": "...", "status": "ok",
             "vulnerabilities_checked": true, "complete": true },
-  "summary": { "dependencies": 21, "packages": 21, "findings": 12,
+  "summary": { "dependencies": 21, "packages": 21, "findings": 12, "suppressed": 2,
                "by_severity": { "critical": 3, "high": 4, "medium": 4, "low": 1 },
                "unchecked_packages": 0, "skipped_files": 0 },
   "manifests": [ ... ],
   "dependencies": [ ... ],
   "findings": [ ... ],
+  "suppressed": [ ... ],
   "unchecked_packages": [ ... ],
   "skipped": [ ... ],
   "warnings": [ ... ]
@@ -58,6 +59,10 @@ Three things are easy to get wrong:
 - **`dependencies[].exclusions` explains an absence.** A coordinate listed there
   was removed from the graph on purpose, which is the one case where something
   missing is not something overlooked.
+- **`summary.findings` counts only what is outstanding.** Findings accepted in
+  the ignore file are counted by `summary.suppressed` and still appear in the
+  `findings` array, each with a `suppression` object. An accepted finding is a
+  decision, not a fix.
 
 The last three arrays — `unchecked_packages`, `skipped` and `warnings` — are the
 report's account of what it could not do. They are the difference between
@@ -112,10 +117,13 @@ one as evidence that anything was checked.
 | `0` | Scan completed. Vulnerabilities may have been found — that is not an error | Read `summary.findings` to decide what to do |
 | `1` | Scan failed, or completed only partially — some files or packages went unchecked | Fail the job; the result is not trustworthy |
 | `2` | Usage error: bad flag, unknown format (Click's reserved code) | Fix the invocation |
+| `3` | `--fail-on` threshold met by an unsuppressed finding | Fail the job; the scan worked, the result did not pass |
 
-Findings deliberately never change the exit code. A scanner that exits non-zero
-on findings sooner or later gets `|| true` appended, at which point genuine tool
-failures go unnoticed too.
+Findings never change the exit code unless you ask for it with `--fail-on`, and
+even then under a code of their own. A scanner that exits non-zero on findings by
+default sooner or later gets `|| true` appended, at which point genuine tool
+failures go unnoticed too — and a pipeline that cannot tell `1` from `3` ends up
+treating both as noise.
 
 !!! note "Exit 2 is usage, exit 1 is scan failure"
 
@@ -124,10 +132,15 @@ failures go unnoticed too.
 
 ## Gating a build on severity
 
-A built-in `--fail-on <severity>` is planned; the report model already carries
-everything it needs. Until then, read the JSON — and check `scan.complete`
-**first**, because gating on findings alone would pass a scan that failed to
-check anything:
+```bash
+icebergsca scan . --fail-on critical
+```
+
+The gate checks completeness before severity, so it cannot pass a scan that failed
+to look anything up, and it ignores findings accepted in `.icebergsca.toml`.
+
+For anything more specific, read the JSON — and check `scan.complete` **first**,
+because gating on findings alone would pass a scan that failed to check anything:
 
 ```bash
 icebergsca scan . --format json --output report.json

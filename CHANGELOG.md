@@ -61,7 +61,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and output says "lookup did not run" rather than "no vulnerabilities found" whenever that is
   the truth.
 - Exit codes: `0` completed (regardless of findings), `1` scan failed or partial, `2` usage
-  error. Findings alone never fail a build.
+  error, `3` `--fail-on` threshold met. Findings alone never fail a build.
+- `--fail-on <severity>` gates a build on unsuppressed findings, checking scan completeness
+  first so it can never pass a scan that failed to look anything up.
+- A triage file, `.icebergsca.toml`, records findings that have been assessed and accepted, so
+  gating is safe to leave switched on rather than being disabled the first week an unfixable
+  transitive advisory appears. Each entry requires a reason, matches exactly on advisory (or
+  alias) and package, and carries an expiry that defaults to 90 days. An accepted finding stays
+  in the report marked `accepted`, is counted by `summary.suppressed`, appears in SARIF as
+  dismissed rather than fixed, and returns when the entry expires. Rules that match nothing, or
+  have expired, are reported as warnings.
+- JSON schema `1.1`: adds a top-level `suppressed` audit trail, `summary.suppressed`, and
+  `findings[].suppression`. Additive only — `summary.findings` and `by_severity` now count
+  active findings, which is unchanged for any scan with no ignore file.
 - Maven graphs are marked approximate — they are reconstructed, not read, and we never shell
   out to `mvn`. Each module of a multi-module build resolves against its own POM, so module
   boundaries hold: one module's nearest-wins choice cannot decide another's versions, and each

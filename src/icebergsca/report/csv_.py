@@ -36,6 +36,10 @@ _COLUMNS = (
     "source_file",
     "source_line",
     "summary",
+    # Appended, never inserted: consumers index these columns positionally and a
+    # spreadsheet built last quarter should still line up.
+    "suppressed",
+    "suppression_reason",
 )
 
 
@@ -84,6 +88,11 @@ def render(report: ScanReport, *, color: bool = True, width: int | None = None) 
                 str(dep.source.path) if dep else "",
                 (dep.source.line or "") if dep else "",
                 advisory.summary.replace("\n", " ").strip(),
+                "true" if finding.is_suppressed else "false",
+                # User-supplied text bound for a spreadsheet. It goes through _defuse
+                # with every other cell below, which is what keeps a reason beginning
+                # "=" from becoming a formula.
+                finding.suppression.reason if finding.suppression else "",
             )
             writer.writerow([_defuse(cell) for cell in row])
 

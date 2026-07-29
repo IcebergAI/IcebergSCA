@@ -78,6 +78,7 @@ icebergsca scan . --format json | jq '{
 | `scan.vulnerabilities_checked` | `false` means the OSV lookup never ran. No conclusion can be drawn at all |
 | `summary.unchecked_packages` | Above `0` means some packages could not be looked up. The result is partial |
 | `scan.complete` | `false` means either of the above, or a file failed to parse |
+| `summary.suppressed` | Above `0` means findings were **accepted, not fixed**. Say so; never fold them into a clean summary |
 
 A correct summary:
 
@@ -93,6 +94,9 @@ elif not report["summary"]["findings"]:
     verdict = f"No known vulnerabilities in {report['summary']['packages']} packages."
 else:
     verdict = f"{report['summary']['findings']} finding(s): {report['summary']['by_severity']}"
+
+if report["summary"]["suppressed"]:
+    verdict += f" ({report['summary']['suppressed']} accepted via the ignore file)"
 ```
 
 ```python
@@ -115,10 +119,35 @@ icebergsca scan .; echo "exit=$?"
 | `0` | The scan completed. Vulnerabilities may have been found — that is not an error |
 | `1` | The scan failed, or completed only partially. Treat the report as incomplete |
 | `2` | Usage error: unknown flag or format |
+| `3` | Only with `--fail-on`: the scan completed and found something at or above the threshold |
 
-Findings deliberately never change the exit code, so a non-zero exit always means *the tool
-could not do its job*, not *your project has problems*. Do not use the exit code to decide
+Findings deliberately never change the exit code unless `--fail-on` was passed, and even then
+under a code of their own. So `1` always means *the tool could not do its job*, and `3` always
+means *it did its job and you did not like the answer*. Do not use the exit code to decide
 whether vulnerabilities exist — read `summary.findings`.
+
+## Accepting a finding
+
+Some findings cannot be fixed and should not be reported forever: an unfixable transitive
+advisory, or one that is genuinely unreachable. `.icebergsca.toml` in the project root records
+that decision.
+
+```toml
+[[ignore]]
+advisory = "GHSA-6757-jp84-gxfx"   # or the CVE — aliases match too
+package  = "pyyaml"                 # bare name, or a purl with or without a version
+reason   = "Unreachable: we never call yaml.load on untrusted input"
+expires  = 2026-10-27               # optional; defaults to 90 days out
+```
+
+What this does **not** do is hide anything. The finding stays in `findings` with a
+`suppression` object, `summary.suppressed` counts it, SARIF marks it dismissed rather than
+fixed, and it stops tripping `--fail-on`. When reporting a scan, say how many findings were
+accepted and by which rule — an accepted finding is a decision somebody made, not a solved
+problem, and it comes back when the entry expires.
+
+A rule that matches nothing, or has expired, produces a `warnings` entry. Surface those: they
+mean either a typo or an entry left behind after the upgrade that fixed it.
 
 ## Reading a finding
 

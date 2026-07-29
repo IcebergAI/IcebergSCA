@@ -80,9 +80,11 @@ follows from this:
 | `0` | Scan completed. Vulnerabilities may have been found — that is not an error |
 | `1` | Scan failed, or completed only partially — some files or packages went unchecked |
 | `2` | Usage error: bad flag, unknown format (Click's reserved code) |
+| `3` | Only with `--fail-on`: the scan completed and found something at or above the threshold |
 
-Severity-based CI gating (`--fail-on`) is planned; the report model already carries everything
-needed for it.
+`--fail-on <severity>` gates a build, and `.icebergsca.toml` records the findings you have
+assessed and accepted so the gate is safe to leave switched on. An accepted finding stays in
+the report, marked and counted separately — it is never silently dropped.
 
 ## Ecosystem support
 

@@ -50,6 +50,29 @@ icebergsca scan ./requirements.txt           # a single file
 
 Logs go to stderr and the report to stdout, so piping the report is always safe.
 
+### Gating and triage
+
+| Flag | Effect |
+|---|---|
+| `--fail-on <severity>` | Exit `3` when an unsuppressed finding is at or above this severity. An incomplete scan still exits `1`, whatever it found |
+| `--ignore-file <path>` | Accepted findings. Defaults to `.icebergsca.toml` beside the scan target when it exists |
+
+`.icebergsca.toml` records findings somebody has assessed and accepted, so that gating is safe
+to leave switched on rather than being disabled the first week an unfixable advisory appears:
+
+```toml
+[[ignore]]
+advisory = "GHSA-6757-jp84-gxfx"   # or the CVE — aliases are matched too
+package  = "pyyaml"                 # bare name, or a purl, optionally versioned
+reason   = "Unreachable: we never call yaml.load on untrusted input"
+expires  = 2026-10-27               # optional; defaults to 90 days out
+```
+
+`reason` is required, matching is exact rather than pattern-based, and an entry that expires
+stops suppressing rather than failing the scan. Nothing is hidden: the finding stays in the
+report marked `accepted`, `summary.suppressed` counts it, and SARIF reports it as dismissed
+rather than fixed. A rule matching nothing produces a warning.
+
 ### Network and cache
 
 | Flag | Effect |
@@ -94,5 +117,7 @@ pure waste.
 | `0` | Scan completed. Vulnerabilities may have been found — that is not an error |
 | `1` | Scan failed, or completed only partially |
 | `2` | Usage error: bad flag, unknown format |
+| `3` | Only with `--fail-on`: an unsuppressed finding met the threshold |
 
-Findings never change the exit code. See [Output and CI](output.md#exit-codes).
+Findings never change the exit code unless you ask with `--fail-on`, and even then
+under a code of their own. See [Output and CI](output.md#exit-codes).
