@@ -13,12 +13,20 @@ The trade-off is honesty about fidelity. We implement Maven's main rules:
 
 * parent inheritance, including properties and ``dependencyManagement``
 * ``import``-scoped BOMs, expanded recursively
-* nearest-wins conflict resolution, breadth-first
-* ``test``/``provided`` scopes not propagating, and ``<exclusions>`` being honoured
+* nearest-wins conflict resolution, breadth-first, **per module**
+* ``test``/``provided`` scopes not propagating
+* ``<exclusions>`` on declared and inherited dependencies alike, including the
+  whole-segment wildcards (``*:*``, ``group:*``, ``*:artifact``) Maven 3 allows
 
 We do not implement profiles, mirrors, ``<relocation>``, version *ranges*, or
-classifier-specific graphs. The result is therefore marked ``approximate`` in the
-report, and the output says so rather than implying a fidelity it does not have.
+classifier-specific graphs, and a parent POM that exists only on disk — never
+published to Central — cannot be read, so the management it supplies is missed. The
+result is therefore marked ``approximate`` in the report, and the output says so
+rather than implying a fidelity it does not have.
+
+Each module is resolved on its own. Sharing one traversal across a reactor lets
+whichever module was walked first decide the others' versions, and leaves every
+transitive attributed to a POM that may not lead to it.
 """
 
 from __future__ import annotations
@@ -26,8 +34,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import httpx
 
@@ -46,6 +55,7 @@ from icebergsca.ecosystems.maven.model import (
     Coordinate,
     Pom,
     RawDependency,
+    is_excluded,
 )
 from icebergsca.ecosystems.maven.parser import (
     has_unresolved_property,
@@ -87,6 +97,8 @@ class EffectivePom:
     managed: dict[str, str] = field(default_factory=dict)
     #: ``group:artifact`` → scope, so a BOM can pin scope as well as version.
     managed_scopes: dict[str, str] = field(default_factory=dict)
+    #: ``group:artifact`` → exclusions, so a parent or BOM can centralise them.
+    managed_exclusions: dict[str, frozenset[str]] = field(default_factory=dict)
     dependencies: tuple[RawDependency, ...] = ()
 
 
@@ -96,6 +108,33 @@ class MavenResult:
     warnings: tuple[str, ...] = ()
     #: True when at least one graph was reconstructed rather than read from a file.
     approximate: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MavenUnit:
+    """One module's declared dependencies, resolved on its own.
+
+    Maven resolves each module against its own effective POM; siblings share a parent,
+    not a graph. Keeping them apart is what stops one module's nearest-wins choice
+    deciding another's versions.
+    """
+
+    directory: PurePath
+    dependencies: tuple[Dependency, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Branch:
+    """One node on the breadth-first frontier."""
+
+    coordinate: Coordinate
+    scope: Scope
+    #: Exclusion patterns accumulated from every edge on the path to this node.
+    exclusions: frozenset[str]
+    #: The ``<dependency>`` element that introduced this branch, carried down so that
+    #: a transitive names the declaration which actually pulled it in rather than
+    #: whichever file happened to be walked first.
+    source: SourceLocation
 
 
 class MavenResolver:
@@ -117,14 +156,60 @@ class MavenResolver:
         self._semaphore = asyncio.Semaphore(max(1, concurrency))
         self._max_depth = max_depth
         self._max_nodes = max_nodes
+        #: Nodes walked across every unit this resolver has expanded. The cap is
+        #: deliberately scan-wide rather than per-module: it exists to bound an
+        #: unbounded fetch loop against Central, and a nine-module reactor must not
+        #: get nine times the budget just for being split up.
+        self._nodes = 0
         self._warnings: list[str] = []
 
     # -- public ------------------------------------------------------------
 
+    async def expand_units(
+        self,
+        declared: tuple[Dependency, ...],
+        units: Sequence[MavenUnit],
+        root: Path | None = None,
+    ) -> MavenResult:
+        """Expand several modules, each against its own POM.
+
+        ``declared`` is the whole scan's dependency list and ``units`` groups the Maven
+        part of it by module. Everything else flows through untouched and in place, so
+        the only difference a non-Maven project sees is that nothing happened.
+
+        One resolver instance serves every unit, so the POM cache, the connection pool
+        and the node budget are shared. A fresh resolver per module would refetch
+        Central for every coordinate the modules have in common — on a reactor, most
+        of them.
+        """
+        resolved: dict[Dependency, Dependency] = {}
+        transitive: list[Dependency] = []
+        warnings: list[str] = []
+        approximate = False
+
+        for unit in units:
+            result = await self.expand(unit.dependencies, root)
+            # ``expand`` returns this unit's declarations first, in the order it was
+            # given them, followed by whatever the walk found beneath them.
+            count = len(unit.dependencies)
+            resolved.update(
+                zip(unit.dependencies, result.dependencies[:count], strict=True)
+            )
+            transitive.extend(result.dependencies[count:])
+            warnings.extend(result.warnings)
+            approximate = approximate or result.approximate
+
+        return MavenResult(
+            dependencies=tuple(resolved.get(dep, dep) for dep in declared)
+            + tuple(transitive),
+            warnings=tuple(dict.fromkeys(warnings)),
+            approximate=approximate,
+        )
+
     async def expand(
         self, declared: tuple[Dependency, ...], root: Path | None = None
     ) -> MavenResult:
-        """Walk the graph beneath a set of declared Maven dependencies.
+        """Walk the graph beneath one module's declared Maven dependencies.
 
         Two things happen here. First any direct dependency that declared no version
         gets one from the project's own ``dependencyManagement`` — which usually means
@@ -139,37 +224,54 @@ class MavenResolver:
         if not maven_deps:
             return MavenResult(declared)
 
+        # Warnings accumulate on the instance so that one shared resolver can serve
+        # every unit; slicing from here keeps a module's result to its own problems
+        # instead of repeating the previous module's.
+        first_warning = len(self._warnings)
+
         declared = await self._backfill(declared, root)
         roots = [dep for dep in declared if dep.ref.ecosystem is EcosystemId.MAVEN]
 
-        found = await self._walk(roots, roots[0].source)
+        found = await self._walk(roots)
         known = {dep.ref.name for dep in declared}
         transitive = tuple(dep for dep in found if dep.ref.name not in known)
 
         return MavenResult(
             dependencies=declared + transitive,
-            warnings=tuple(dict.fromkeys(self._warnings)),
+            warnings=tuple(dict.fromkeys(self._warnings[first_warning:])),
             approximate=True,
         )
 
     async def _backfill(
         self, declared: tuple[Dependency, ...], root: Path | None
     ) -> tuple[Dependency, ...]:
-        """Fill in versions the project's own dependencyManagement supplies.
+        """Fill in what the project's own dependencyManagement supplies.
 
         The synchronous parser can only see literal versions in the file it was
         handed. A ``<scope>import</scope>`` BOM lives on Maven Central, so resolving
         it needs the network and has to happen here.
+
+        Only this unit's own POMs are read. Pooling every POM in the tree would let a
+        BOM imported by one module supply versions to another, which no Maven build
+        does and which quietly attributes one module's choices to another.
         """
+        if root is None:
+            return declared
+
         unresolved = {
             dep.source.path
             for dep in declared
             if dep.ref.ecosystem is EcosystemId.MAVEN and dep.ref.version is None
         }
-        if not unresolved or root is None:
+        # Still gated on an unresolved version, so a fully-versioned project pays no
+        # network cost it did not pay before. Same-file management exclusions are
+        # already applied by the parser; what this adds is the BOM-supplied ones,
+        # which is the case that needs Central anyway.
+        if not unresolved:
             return declared
 
         managed: dict[str, str] = {}
+        managed_exclusions: dict[str, frozenset[str]] = {}
         for relative in sorted(unresolved):
             path = root / relative
             if path.name.lower() != "pom.xml":
@@ -185,99 +287,131 @@ class MavenResolver:
             properties = dict(pom.properties)
             properties.setdefault("project.version", pom.coordinate.version or "")
             properties.setdefault("project.groupId", pom.coordinate.group)
-            await self._apply_management(pom, properties, managed, {})
+            await self._apply_management(
+                pom, properties, managed, {}, managed_exclusions
+            )
 
-        if not managed:
+        if not managed and not managed_exclusions:
             return declared
 
         return tuple(
-            replace(
-                dep,
-                ref=PackageRef(EcosystemId.MAVEN, dep.ref.name, managed[dep.ref.name]),
-                pin=Pin.PINNED,
-            )
-            if dep.ref.ecosystem is EcosystemId.MAVEN
-            and dep.ref.version is None
-            and dep.ref.name in managed
-            else dep
-            for dep in declared
+            self._backfilled(dep, managed, managed_exclusions) for dep in declared
+        )
+
+    @staticmethod
+    def _backfilled(
+        dep: Dependency,
+        managed: dict[str, str],
+        managed_exclusions: dict[str, frozenset[str]],
+    ) -> Dependency:
+        """Apply management-supplied versions and exclusions to one declaration."""
+        if dep.ref.ecosystem is not EcosystemId.MAVEN:
+            return dep
+
+        inherited = managed_exclusions.get(dep.ref.name, frozenset())
+        exclusions = dep.exclusions | inherited
+        version = managed.get(dep.ref.name) if dep.ref.version is None else None
+
+        if version is None and exclusions == dep.exclusions:
+            return dep
+        if version is None:
+            return replace(dep, exclusions=exclusions)
+
+        return replace(
+            dep,
+            ref=PackageRef(EcosystemId.MAVEN, dep.ref.name, version),
+            pin=Pin.PINNED,
+            exclusions=exclusions,
         )
 
     # -- traversal ---------------------------------------------------------
 
-    async def _walk(
-        self, roots: list[Dependency], source: SourceLocation
-    ) -> list[Dependency]:
-        """Breadth-first, nearest-wins.
+    async def _walk(self, roots: list[Dependency]) -> list[Dependency]:
+        """Breadth-first, nearest-wins, over one module.
 
         Maven resolves a version conflict by taking the declaration closest to the
         root, so a breadth-first walk that ignores any coordinate already seen
         reproduces that rule exactly — the first time a ``group:artifact`` is
         reached is by definition its shortest path.
+
+        ``seen`` is local to one call, and one call covers one module. Sharing it
+        across modules would let whichever module was walked first decide the others'
+        versions, which is not what Maven does and not what their builds produce.
         """
         seen: dict[str, str | None] = {}
         results: list[Dependency] = []
 
-        frontier: list[tuple[Coordinate, Scope, frozenset[str]]] = []
+        frontier: list[_Branch] = []
         for dep in roots:
             group, _, artifact = dep.ref.name.partition(":")
             seen[dep.ref.name] = dep.ref.version
             if dep.ref.version and dep.scope not in (Scope.TEST,):
                 frontier.append(
-                    (
-                        Coordinate(group, artifact, dep.ref.version),
-                        dep.scope,
-                        frozenset(),
+                    _Branch(
+                        coordinate=Coordinate(group, artifact, dep.ref.version),
+                        scope=dep.scope,
+                        # A declaration's own <exclusions> apply to everything beneath
+                        # it. They are checked against children only, so a dependency
+                        # is never removed by its own exclusion list.
+                        exclusions=dep.exclusions,
+                        source=dep.source,
                     )
                 )
+        self._nodes += len(seen)
 
         depth = 0
-        while frontier and depth < self._max_depth and len(seen) < self._max_nodes:
+        while frontier and depth < self._max_depth and self._nodes < self._max_nodes:
             depth += 1
             poms = await asyncio.gather(
-                *(self._effective(coordinate) for coordinate, _, _ in frontier),
+                *(self._effective(branch.coordinate) for branch in frontier),
                 return_exceptions=True,
             )
 
-            next_frontier: list[tuple[Coordinate, Scope, frozenset[str]]] = []
-            for (parent_coord, parent_scope, inherited), pom in zip(
-                frontier, poms, strict=True
-            ):
+            next_frontier: list[_Branch] = []
+            for branch, pom in zip(frontier, poms, strict=True):
                 if isinstance(pom, BaseException) or pom is None:
-                    logger.debug("could not resolve %s: %s", parent_coord, pom)
+                    logger.debug("could not resolve %s: %s", branch.coordinate, pom)
                     continue
 
-                for child, version, scope in self._children(pom, parent_scope):
-                    if child.key in inherited or child.key in seen:
+                parent = PackageRef(
+                    EcosystemId.MAVEN, branch.coordinate.key, branch.coordinate.version
+                )
+                for child, version, scope in self._children(pom, branch.scope):
+                    if is_excluded(child.key, branch.exclusions) or child.key in seen:
                         continue
-                    if len(seen) >= self._max_nodes:
+                    if self._nodes >= self._max_nodes:
                         break
 
                     seen[child.key] = version
+                    self._nodes += 1
                     results.append(
                         Dependency(
                             ref=PackageRef(EcosystemId.MAVEN, child.key, version),
                             scope=scope,
                             direct=False,
-                            source=source,
+                            source=branch.source,
                             pin=Pin.PINNED if version else Pin.UNRESOLVED,
+                            parents=(parent,),
                         )
                     )
                     if version:
                         next_frontier.append(
-                            (
-                                Coordinate(child.group, child.artifact, version),
-                                scope,
-                                inherited | child.exclusions,
+                            _Branch(
+                                coordinate=Coordinate(
+                                    child.group, child.artifact, version
+                                ),
+                                scope=scope,
+                                exclusions=branch.exclusions | child.exclusions,
+                                source=branch.source,
                             )
                         )
 
             frontier = next_frontier
 
-        if len(seen) >= self._max_nodes:
+        if self._nodes >= self._max_nodes:
             self._warnings.append(
-                f"Maven graph truncated at {self._max_nodes} packages; "
-                "the dependency list is incomplete"
+                f"Maven graph truncated at {self._max_nodes} packages across the "
+                "scan; the dependency list is incomplete"
             )
         return results
 
@@ -327,7 +461,11 @@ class MavenResolver:
                 artifact=artifact,
                 version=version,
                 scope=entry.scope,
-                exclusions=entry.exclusions,
+                # Maven merges the two lists rather than letting either replace the
+                # other, which is how a parent centralises an exclusion for a
+                # dependency that declares none of its own.
+                exclusions=entry.exclusions
+                | pom.managed_exclusions.get(key, frozenset()),
             )
             children.append((resolved, version, scope))
 
@@ -344,6 +482,7 @@ class MavenResolver:
         properties: dict[str, str] = {}
         managed: dict[str, str] = {}
         managed_scopes: dict[str, str] = {}
+        managed_exclusions: dict[str, frozenset[str]] = {}
 
         chain: list[Pom] = [pom]
         current = pom
@@ -366,13 +505,16 @@ class MavenResolver:
         properties.setdefault("project.artifactId", coordinate.artifact)
 
         for entry in reversed(chain):
-            await self._apply_management(entry, properties, managed, managed_scopes)
+            await self._apply_management(
+                entry, properties, managed, managed_scopes, managed_exclusions
+            )
 
         return EffectivePom(
             coordinate=coordinate,
             properties=properties,
             managed=managed,
             managed_scopes=managed_scopes,
+            managed_exclusions=managed_exclusions,
             dependencies=pom.dependencies,
         )
 
@@ -382,6 +524,7 @@ class MavenResolver:
         properties: dict[str, str],
         managed: dict[str, str],
         managed_scopes: dict[str, str],
+        managed_exclusions: dict[str, frozenset[str]],
     ) -> None:
         """Fold one POM's dependencyManagement in, expanding imported BOMs first.
 
@@ -401,12 +544,17 @@ class MavenResolver:
                     )
                     for key, bom_version in bom.managed.items():
                         managed.setdefault(key, bom_version)
+                    for key, bom_exclusions in bom.managed_exclusions.items():
+                        managed_exclusions.setdefault(key, bom_exclusions)
                 continue
 
+            key = f"{group}:{artifact}"
             if version and not has_unresolved_property(version):
-                managed[f"{group}:{artifact}"] = version
+                managed[key] = version
             if entry.scope:
-                managed_scopes[f"{group}:{artifact}"] = entry.scope
+                managed_scopes[key] = entry.scope
+            if entry.exclusions:
+                managed_exclusions[key] = entry.exclusions
 
     async def _fetch_pom(self, coordinate: Coordinate) -> Pom | None:
         """Fetch and parse one POM, cached for a week.

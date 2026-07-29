@@ -271,6 +271,12 @@ class Dependency:
     #: Packages that pull this one in. Only populated for lockfiles that record
     #: edges; empty is "we don't know", never "nothing depends on it".
     parents: tuple[PackageRef, ...] = ()
+    #: ``group:artifact`` keys this dependency must not drag in — Maven
+    #: ``<exclusions>`` today, Gradle ``exclude`` and npm ``overrides`` later.
+    #: Empty means "nothing was excluded", and deliberately not ``None`` for "we
+    #: could not tell": a parser that cannot read exclusions leaves this empty and
+    #: the graph over-reports, which is the safe way round.
+    exclusions: frozenset[str] = frozenset()
 
     @property
     def is_runtime(self) -> bool:

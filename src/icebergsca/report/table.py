@@ -94,6 +94,13 @@ def _render_manifests(console: Console, report: ScanReport) -> None:
         )
 
     console.print(table)
+    if any(result.approximate for result in report.manifests):
+        # The marker was previously printed with nothing anywhere explaining it, which
+        # left readers to guess whether it meant "incomplete" or "untrusted".
+        console.print(
+            "[dim][yellow]~[/yellow] graph reconstructed from the registry rather "
+            "than read from a lockfile; each module resolved on its own[/dim]"
+        )
     console.print()
 
 

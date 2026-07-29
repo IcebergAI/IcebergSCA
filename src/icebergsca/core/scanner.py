@@ -39,7 +39,7 @@ from icebergsca.core.models import (
 )
 from icebergsca.ecosystems import get as get_ecosystem
 from icebergsca.ecosystems.base import FileParser
-from icebergsca.ecosystems.maven import MavenResolver, MavenResult
+from icebergsca.ecosystems.maven import MavenResolver, MavenResult, MavenUnit
 from icebergsca.osv.client import USER_AGENT, OSVClient, OSVResult
 from icebergsca.registry import RegistryClient
 from icebergsca.resolve import Resolver
@@ -89,7 +89,7 @@ async def scan(root: Path, options: ScanOptions | None = None) -> ScanReport:
     discovery = discover(root, options.discovery)
     kept, results, skipped, warnings = _parse_all(discovery, options.scopes)
 
-    outcome = await _resolve_and_check(kept, options, discovery.root)
+    outcome = await _resolve_and_check(kept, discovery.units, options, discovery.root)
 
     return ScanReport(
         root=discovery.root,
@@ -138,7 +138,10 @@ class _VulnOutcome:
 
 
 async def _resolve_and_check(
-    dependencies: tuple[Dependency, ...], options: ScanOptions, root: Path
+    dependencies: tuple[Dependency, ...],
+    units: tuple[ScanUnit, ...],
+    options: ScanOptions,
+    root: Path,
 ) -> _VulnOutcome:
     """Stages 3 and 4: resolve unpinned constraints, then look everything up in OSV.
 
@@ -173,7 +176,9 @@ async def _resolve_and_check(
                     cache,
                     offline=options.offline,
                     concurrency=options.concurrency,
-                ).expand(dependencies, root=root)
+                ).expand_units(
+                    dependencies, _maven_units(dependencies, units), root=root
+                )
                 dependencies = tuple(
                     dep for dep in maven.dependencies if dep.scope in options.scopes
                 )
@@ -234,6 +239,41 @@ async def _resolve_and_check(
         checked=True,
         warnings=warnings,
         maven_approximate=maven.approximate,
+    )
+
+
+def _maven_units(
+    dependencies: tuple[Dependency, ...], units: tuple[ScanUnit, ...]
+) -> tuple[MavenUnit, ...]:
+    """Regroup the flat dependency list back onto the scan units it came from.
+
+    Discovery assigns every file to exactly one (ecosystem, directory) unit, and the
+    parsers stamp each dependency with the file it was declared in, so ``source.path``
+    identifies a dependency's unit exactly. Regrouping here rather than threading units
+    through the parse stage keeps ``_parse_all`` unchanged and — because it happens
+    after ``_dedupe`` — guarantees the resolver sees the same list the report will.
+
+    A Maven dependency whose path belongs to no unit still gets a unit of its own.
+    Silently dropping it would remove packages from the report, which is the one thing
+    this stage must never do.
+    """
+    owner = {
+        path: PurePath(unit.directory)
+        for unit in units
+        if unit.ecosystem is EcosystemId.MAVEN
+        for path in unit.files
+    }
+
+    grouped: dict[PurePath, list[Dependency]] = defaultdict(list)
+    for dep in dependencies:
+        if dep.ref.ecosystem is not EcosystemId.MAVEN:
+            continue
+        path = PurePath(dep.source.path)
+        grouped[owner.get(path, path.parent)].append(dep)
+
+    return tuple(
+        MavenUnit(directory=directory, dependencies=tuple(deps))
+        for directory, deps in grouped.items()
     )
 
 

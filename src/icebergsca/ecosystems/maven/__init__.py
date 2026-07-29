@@ -7,7 +7,7 @@ declares, and :mod:`resolver` reconstructs everything beneath it from Maven Cent
 from icebergsca.core.models import EcosystemId
 from icebergsca.ecosystems.base import EcosystemSpec, FileSpec, unimplemented
 from icebergsca.ecosystems.maven.parser import parse_manifest
-from icebergsca.ecosystems.maven.resolver import MavenResolver, MavenResult
+from icebergsca.ecosystems.maven.resolver import MavenResolver, MavenResult, MavenUnit
 
 SPEC = EcosystemSpec(
     id=EcosystemId.MAVEN,
@@ -19,4 +19,4 @@ SPEC = EcosystemSpec(
     parse_lockfile=unimplemented("Maven lockfile"),
 )
 
-__all__ = ["SPEC", "MavenResolver", "MavenResult", "parse_manifest"]
+__all__ = ["SPEC", "MavenResolver", "MavenResult", "MavenUnit", "parse_manifest"]

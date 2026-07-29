@@ -57,7 +57,8 @@ files that introduced it:
 the report describes what is actually installed, not what would resolve today. Only when no
 lockfile is present does it fall back to resolving version ranges against the registry, and
 those findings are labelled `resolved` rather than `pinned`. Java, which has no lockfile, gets
-its graph reconstructed from Maven Central and is marked `~` for approximate.
+its graph reconstructed from Maven Central and is marked `~` for approximate — one module at a
+time, so a reactor's module boundaries survive into the report.
 
 **A clean result is never implied unless it was earned.** Most of the rest of the design
 follows from this:

@@ -45,8 +45,14 @@ the file records the selected set, not the shape that produced it.
 
 Java has no lockfile. The graph is reconstructed by fetching POMs from Maven
 Central and applying parent inheritance, BOM imports, nearest-wins and
-exclusions. Not modelled: profiles, mirrors, relocation and version ranges.
+exclusions. Not modelled: profiles, mirrors, relocation, version ranges, and
+parent POMs that exist only on disk rather than on Central.
 Affected manifests carry `approximate: true`, and the table marks them `~`.
+
+Each module of a multi-module build is resolved against its own POM, the way
+Maven does it. Two modules may therefore report different versions of the same
+coordinate, and each transitive names the `<dependency>` declaration that
+introduced it rather than whichever POM was read first.
 
 IcebergSCA never shells out to `mvn`. Running a project's own build in order to
 discover its dependencies is itself a supply chain risk.

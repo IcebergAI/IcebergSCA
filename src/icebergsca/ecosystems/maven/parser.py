@@ -158,13 +158,21 @@ def _dependencies(container: Element | None) -> tuple[RawDependency, ...]:
     parsed: list[RawDependency] = []
     for element in _children(container, "dependency"):
         exclusions_element = _child(element, "exclusions")
-        exclusions = (
-            frozenset(
-                f"{_text(item, 'groupId')}:{_text(item, 'artifactId')}"
-                for item in _children(exclusions_element, "exclusion")
-            )
+        # A half-declared exclusion is discarded rather than kept as ``g:`` or ``:a``.
+        # Exclusions remove packages from the report, and a half-key sits one wildcard
+        # rule away from matching everything — dropping it over-reports, which is the
+        # direction to fail in.
+        items = (
+            _children(exclusions_element, "exclusion")
             if exclusions_element is not None
-            else frozenset()
+            else []
+        )
+        exclusions = frozenset(
+            f"{group}:{artifact}"
+            for group, artifact in (
+                (_text(item, "groupId"), _text(item, "artifactId")) for item in items
+            )
+            if group and artifact
         )
 
         parsed.append(
@@ -241,27 +249,57 @@ def _parse_pom_manifest(path: Path, content: str) -> list[Dependency]:
         for entry in pom.managed
         if entry.version
     }
+    # Maven merges a managed entry's exclusions with the dependency's own rather than
+    # letting either replace the other, which is how a parent centralises an exclusion
+    # for a dependency that declares none of its own.
+    managed_exclusions = {
+        entry.key: entry.exclusions for entry in pom.managed if entry.exclusions
+    }
 
     dependencies: list[Dependency] = []
     for entry in pom.dependencies:
         group = interpolate(entry.group, properties) or entry.group
         artifact = interpolate(entry.artifact, properties) or entry.artifact
-        version = interpolate(entry.version, properties) or managed_versions.get(
-            f"{group}:{artifact}"
-        )
+        key = f"{group}:{artifact}"
+        version = interpolate(entry.version, properties) or managed_versions.get(key)
 
         usable = version if version and not has_unresolved_property(version) else None
         dependencies.append(
             Dependency(
-                ref=PackageRef(EcosystemId.MAVEN, f"{group}:{artifact}", usable),
+                ref=PackageRef(EcosystemId.MAVEN, key, usable),
                 scope=maven_scope(entry.scope or DEFAULT_SCOPE),
                 direct=True,
                 source=SourceLocation(path, _find_line(content, artifact)),
                 pin=Pin.PINNED if usable else Pin.UNRESOLVED,
                 constraint=version,
+                exclusions=_interpolated_exclusions(
+                    entry.exclusions | managed_exclusions.get(key, frozenset()),
+                    properties,
+                ),
             )
         )
     return dependencies
+
+
+def _interpolated_exclusions(
+    exclusions: frozenset[str], properties: dict[str, str]
+) -> frozenset[str]:
+    """Resolve ``${...}`` in exclusion keys, which are coordinates like any other.
+
+    A key left with an unresolved property is kept verbatim: it will simply not match,
+    which leaves the package in the report rather than removing it on a guess.
+    """
+    if not exclusions:
+        return frozenset()
+
+    resolved: set[str] = set()
+    for key in exclusions:
+        group, _, artifact = key.partition(":")
+        resolved.add(
+            f"{interpolate(group, properties) or group}"
+            f":{interpolate(artifact, properties) or artifact}"
+        )
+    return frozenset(resolved)
 
 
 def _parse_gradle(path: Path, content: str) -> list[Dependency]:
