@@ -57,6 +57,27 @@ class RawDependency:
         return f"{self.group}:{self.artifact}"
 
 
+def is_excluded(key: str, exclusions: frozenset[str]) -> bool:
+    """True when a ``group:artifact`` key matches any exclusion pattern.
+
+    Maven 3 allows ``*`` in either position, but only as a *whole* segment: ``org.foo*``
+    is not a prefix glob in Maven and must not become one here. That restraint matters
+    more than the feature does. An exclusion is the one thing in this tool that removes
+    a package from the report rather than adding one, so an over-eager pattern hides a
+    real dependency instead of merely making noise.
+    """
+    if key in exclusions:
+        # The overwhelmingly common case, and the only one that costs nothing.
+        return True
+
+    group, _, artifact = key.partition(":")
+    return any(
+        pattern in ("*:*", f"{group}:*", f"*:{artifact}")
+        for pattern in exclusions
+        if "*" in pattern
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Pom:
     """One parsed POM file, with nothing inherited or interpolated yet."""

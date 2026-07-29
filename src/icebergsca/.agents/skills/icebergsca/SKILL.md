@@ -214,6 +214,18 @@ anything was checked.
 * **Maven and Gradle graphs are approximate.** Java has no lockfile, so the graph is
   reconstructed from Maven Central. Affected manifests carry `"approximate": true`. Mention
   this when reporting Java results.
+* **Multi-module Maven provenance is trustworthy — you do not need to re-derive it.** Each
+  module resolves against its own POM, so a transitive's `source` is the declaration that
+  actually introduced it, `source.line` points at that `<dependency>` element, and `parents`
+  names the package it came through. Two modules may legitimately report different versions of
+  the same coordinate; that is Maven's per-module nearest-wins, not a bug. What `approximate`
+  still covers: profiles, mirrors, `<relocation>`, version ranges, and a parent POM that lives
+  only on disk and was never published to Central — management supplied that way is missed, and
+  the dependencies affected show up as `pin: "unresolved"`.
+* **`<exclusions>` are applied, so an excluded artifact is absent by design.** Declared and
+  `dependencyManagement`-supplied exclusions both count, including Maven's whole-segment
+  wildcards. If a package you expected is missing, check the `exclusions` list on the
+  dependency that would have pulled it in before concluding the scan missed it.
 * **Go reads `go.mod`, never `go.sum`.** `go.sum` lists versions merely *considered* during
   resolution, so scanning it reports vulnerabilities in code that was never built.
 * **`yarn.lock` v1 records no scope.** Without a sibling `package.json`, dev transitives are

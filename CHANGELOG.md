@@ -63,5 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exit codes: `0` completed (regardless of findings), `1` scan failed or partial, `2` usage
   error. Findings alone never fail a build.
 - Maven graphs are marked approximate — they are reconstructed, not read, and we never shell
-  out to `mvn`.
+  out to `mvn`. Each module of a multi-module build resolves against its own POM, so module
+  boundaries hold: one module's nearest-wins choice cannot decide another's versions, and each
+  transitive is attributed to the `<dependency>` declaration that introduced it.
+- Maven `<exclusions>` are honoured on declared dependencies as well as inherited ones,
+  including entries supplied by `dependencyManagement` and Maven's whole-segment wildcards.
+  Excluded coordinates are absent from the report, and the `exclusions` field on each
+  dependency records what was removed.
 - Licensed under Apache 2.0.

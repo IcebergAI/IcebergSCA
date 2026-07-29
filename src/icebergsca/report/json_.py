@@ -97,6 +97,10 @@ def _dependency(dep: Dependency) -> dict[str, Any]:
         "constraint": dep.constraint,
         "source": {"path": str(dep.source.path), "line": dep.source.line},
         "parents": [ref.purl for ref in dep.parents],
+        # Emitted so that a removal stays auditable. An exclusion is the one thing
+        # here that takes a package *out* of the graph, and a reader has no other way
+        # to tell a package that was excluded from one that was never there.
+        "exclusions": sorted(dep.exclusions),
     }
 
 

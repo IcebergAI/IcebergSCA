@@ -123,8 +123,22 @@ as version `(123456,)` and orders as a real version.
 **Maven is approximate and says so.** Parent inheritance, BOM imports, nearest-wins and exclusions
 — not profiles, mirrors, relocation or version ranges. Never shell out to `mvn`: running a
 project's build to discover its dependencies is itself a supply chain risk.
-`MavenResolver._backfill` re-reads `pom.xml` to apply BOM-supplied versions to direct dependencies,
-which the synchronous parser cannot do because BOMs live on Central.
+`MavenResolver._backfill` re-reads `pom.xml` to apply BOM-supplied versions and exclusions to
+direct dependencies, which the synchronous parser cannot do because BOMs live on Central.
+
+**Maven resolves one module at a time.** `_maven_units` in `scanner.py` regroups the flat
+dependency list back onto its scan units by `source.path`, and `expand_units` walks each
+separately on one shared resolver — shared cache, shared connection pool, shared node budget.
+Merging a reactor into one traversal gives whichever module is walked first the deciding vote on
+every shared coordinate, and leaves every transitive stamped with a POM that need not lead to it.
+
+**Exclusions are the one thing here that removes packages.** Everything else in this codebase
+fails towards over-reporting; `is_excluded` fails the other way, so a bug in it hides a real
+dependency instead of adding noise. Hence: wildcards are whole-segment only (`*:*`, `g:*`,
+`*:a` — never a prefix glob), half-declared `<exclusion>` elements are dropped at parse time so
+they cannot become accidental wildcards, and `Dependency.exclusions` is emitted in JSON so every
+removal stays auditable. The negative tests in `tests/test_maven.py` that assert a wildcard does
+*not* fire are load-bearing.
 
 **Ranges, SARIF and CycloneDX are hand-written** rather than pulled from packages — a dependency
 scanner with a large dependency tree of its own is a poor advertisement. Correctness is held by
@@ -159,6 +173,14 @@ and versions. This has caught two real bugs (a missing `coverage[toml]` extra tr
 - No SBOM *ingest*.
 - npm/yarn v1 lockfiles record no scope, so dev transitives are reported as runtime unless a
   `package.json` sits alongside.
-- Gradle sees only literal declarations — no version catalogues or computed versions.
+- Gradle sees only literal declarations — no version catalogues or computed versions, and no
+  `exclude` handling, so a Gradle graph over-reports where a Maven one would not.
+- A parent POM that exists only on disk is never read. `_effective` fetches parents from
+  Central and `_backfill` reads a module's own POM, so an unpublished aggregator parent supplies
+  neither versions nor exclusions to its modules; the dependencies affected stay `unresolved`.
+  This is the largest remaining gap for real reactors.
+- `dependencyManagement` exclusions supplied by an imported BOM reach a project only when that
+  project also has a version to resolve — `_backfill` is gated on an unresolved version so a
+  fully-versioned project pays no network cost.
 - OSV's unversioned second pass for `MAL-` advisories on yanked packages is not implemented;
   malicious advisories affecting the installed version still surface normally.

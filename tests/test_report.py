@@ -300,3 +300,55 @@ def test_every_declared_format_renders(fmt: OutputFormat) -> None:
 def test_an_unregistered_format_fails_clearly() -> None:
     with pytest.raises(IcebergSCAError, match="not implemented yet"):
         render(make_report(), "yaml")  # type: ignore[arg-type]
+
+
+def test_the_approximate_marker_is_explained_rather_than_left_bare() -> None:
+    """A lone ``~`` reads as either "incomplete" or "untrusted"; say which."""
+    output = table_of(
+        {
+            "manifests": (
+                ManifestResult(
+                    ecosystem=EcosystemId.MAVEN,
+                    directory=Path("."),
+                    manifests=(Path("pom.xml"),),
+                    parsed=(Path("pom.xml"),),
+                    approximate=True,
+                ),
+            )
+        }
+    )
+    assert "reconstructed" in output
+
+
+def test_no_legend_when_nothing_was_reconstructed() -> None:
+    output = table_of(
+        {
+            "manifests": (
+                ManifestResult(
+                    ecosystem=EcosystemId.PYPI,
+                    directory=Path("."),
+                    lockfiles=(Path("uv.lock"),),
+                    parsed=(Path("uv.lock"),),
+                    from_lockfile=True,
+                ),
+            )
+        }
+    )
+    assert "reconstructed" not in output
+
+
+def test_json_records_what_a_dependency_excludes() -> None:
+    """An exclusion removes a package, so the report has to say it did."""
+    report = make_report(
+        dependencies=(
+            make_dependency(
+                "displaytag:displaytag",
+                "1.2",
+                ecosystem=EcosystemId.MAVEN,
+                path="pom.xml",
+                exclusions=frozenset({"com.lowagie:itext"}),
+            ),
+        )
+    )
+    payload = json.loads(render(report, OutputFormat.JSON))
+    assert payload["dependencies"][0]["exclusions"] == ["com.lowagie:itext"]

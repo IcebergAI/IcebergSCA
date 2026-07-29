@@ -95,7 +95,9 @@ hypothetical fresh install.
 
 Java is the systematic exception: it has no lockfile, so the graph is
 reconstructed from Maven Central and every affected manifest is marked
-`approximate`.
+`approximate`. Each module is resolved separately, so module boundaries hold:
+a transitive is attributed to the declaration that introduced it, and one
+module's version choice does not leak into another's.
 
 ## Scope
 

@@ -55,6 +55,9 @@ Three things are easy to get wrong:
 - **`manifests[].parsed` is what was actually read**, which differs from
   `lockfiles` when a lockfile could not be parsed and its manifest was used
   instead.
+- **`dependencies[].exclusions` explains an absence.** A coordinate listed there
+  was removed from the graph on purpose, which is the one case where something
+  missing is not something overlooked.
 
 The last three arrays — `unchecked_packages`, `skipped` and `warnings` — are the
 report's account of what it could not do. They are the difference between

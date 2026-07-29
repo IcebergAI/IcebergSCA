@@ -86,7 +86,9 @@ One entry per ecosystem-and-directory scan unit.
 * `parsed` is what was **actually read**, which differs from `lockfiles` when a lockfile could
   not be parsed and the manifest was used instead. Report `parsed`, not `lockfiles`.
 * `from_lockfile: false` means versions are declared, not installed.
-* `approximate: true` means the graph was reconstructed rather than read — currently Maven.
+* `approximate: true` means the graph was reconstructed rather than read — currently Maven. It
+  does *not* mean provenance is guesswork: each module is resolved on its own, so a
+  transitive's `source` names the declaration that introduced it.
 * `dependency_count` values sum to `summary.dependencies`.
 
 ## `dependencies`
@@ -100,7 +102,8 @@ One entry per ecosystem-and-directory scan unit.
   "pin": "pinned",
   "constraint": null,
   "source": { "path": "requirements.txt", "line": 4 },
-  "parents": ["pkg:pypi/requests@2.19.1"]
+  "parents": ["pkg:pypi/requests@2.19.1"],
+  "exclusions": []
 }
 ```
 
@@ -112,8 +115,13 @@ One entry per ecosystem-and-directory scan unit.
 * `constraint` is the raw declared text (`">=2.0,<3.0"`, `"^4.17.21"`) when the version was not
   pinned outright.
 * `source.line` is `null` for JSON and XML manifests, where a line number would be guesswork.
-* `parents` is populated only for lockfile formats that record edges. Empty means "unknown",
-  never "nothing depends on it".
+* `parents` is populated for lockfile formats that record edges and for reconstructed Maven
+  transitives. Empty means "unknown", never "nothing depends on it".
+* `source` on a reconstructed Maven transitive is the declaration that introduced it — the
+  module's own POM and the `<dependency>` line — not merely the first file scanned.
+* `exclusions` lists the `group:artifact` keys this declaration removes from its own subtree
+  (Maven `<exclusions>`, wildcards included). A package named here is absent from the graph
+  deliberately, which is the one case where something is missing without being an error.
 
 ## `findings`
 
