@@ -45,7 +45,11 @@ def to_dict(report: ScanReport) -> dict[str, Any]:
             "direct": report.direct_count,
             "transitive": report.transitive_count,
             "packages": len(report.packages),
-            "findings": len(report.findings),
+            # Outstanding findings. ``suppressed`` is reported beside it rather than
+            # inside it, so a consumer reading only ``findings`` under-states nothing:
+            # the total is findings + suppressed, and both are named.
+            "findings": len(report.active_findings),
+            "suppressed": len(report.suppressed_findings),
             "by_severity": {
                 level.value: count
                 for level, count in report.counts_by_severity().items()
@@ -56,6 +60,12 @@ def to_dict(report: ScanReport) -> dict[str, Any]:
         "manifests": [_manifest(result) for result in report.manifests],
         "dependencies": [_dependency(dep) for dep in report.dependencies],
         "findings": [_finding(finding) for finding in report.sorted_findings()],
+        # The rules, not a second copy of the findings. Duplicating finding objects
+        # across two arrays invites double-counting, and lets a consumer read
+        # ``findings`` alone and never learn some were accepted — which is why the
+        # per-finding state lives on the finding itself. What is here instead is the
+        # audit trail: which entry accepted what, and which did no work at all.
+        "suppressed": _suppressions(report),
         "unchecked_packages": [_package(ref) for ref in report.scan_failed],
         "skipped": [
             {"path": str(entry.path), "reason": entry.reason}
@@ -63,6 +73,28 @@ def to_dict(report: ScanReport) -> dict[str, Any]:
         ],
         "warnings": list(report.warnings),
     }
+
+
+def _suppressions(report: ScanReport) -> list[dict[str, Any]]:
+    """One entry per ignore rule that fired, with what it accepted."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for finding in report.sorted_findings():
+        rule = finding.suppression
+        if rule is None:
+            continue
+        entry = grouped.setdefault(
+            rule.rule,
+            {
+                "rule": rule.rule,
+                "reason": rule.reason,
+                "expires": rule.expires.isoformat(),
+                "findings": [],
+            },
+        )
+        entry["findings"].append(
+            {"advisory": finding.advisory.id, "purl": finding.package.purl}
+        )
+    return list(grouped.values())
 
 
 def _package(ref: PackageRef) -> dict[str, Any]:
@@ -138,4 +170,16 @@ def _finding(finding: Finding) -> dict[str, Any]:
             }
             for dep in finding.introduced_by
         ],
+        # Present on every finding, ``null`` when nothing accepted it, so that reading
+        # this field is never optional. A consumer that skips it counts an accepted
+        # finding as outstanding, which is the harmless direction.
+        "suppression": (
+            None
+            if finding.suppression is None
+            else {
+                "reason": finding.suppression.reason,
+                "expires": finding.suppression.expires.isoformat(),
+                "rule": finding.suppression.rule,
+            }
+        ),
     }

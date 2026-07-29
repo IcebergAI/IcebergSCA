@@ -8,6 +8,7 @@ this test proves the result is actually valid.
 from __future__ import annotations
 
 import json
+from datetime import date
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from icebergsca.core.models import (
     PackageRef,
     Severity,
     SeverityLevel,
+    Suppression,
 )
 from icebergsca.report import OutputFormat, cyclonedx, render, sarif
 from tests.conftest import make_advisory, make_dependency, make_report
@@ -80,6 +82,7 @@ def sample_report(**overrides: Any) -> Any:
     unscored = make_dependency(
         "left-pad", "1.0.0", ecosystem=EcosystemId.NPM, path="package.json"
     )
+    accepted = make_dependency("jinja2", "3.1.2", path="requirements.txt", line=7)
 
     findings = (
         Finding(
@@ -104,10 +107,22 @@ def sample_report(**overrides: Any) -> Any:
             advisory=make_advisory("MAL-2024-1", level=None),
             introduced_by=(unscored,),
         ),
+        Finding(
+            package=accepted.ref,
+            advisory=make_advisory("GHSA-cccc", level=SeverityLevel.HIGH, score=7.5),
+            introduced_by=(accepted,),
+            # Suppressed findings are rendered, not dropped, so they must satisfy the
+            # official schemas like any other — which is what this entry buys.
+            suppression=Suppression(
+                reason="Unreachable: the affected parser is never called",
+                expires=date(2026, 10, 27),
+                rule="GHSA-cccc@jinja2",
+            ),
+        ),
     )
 
     defaults: dict[str, Any] = {
-        "dependencies": (scored, transitive, unscored),
+        "dependencies": (scored, transitive, unscored, accepted),
         "findings": findings,
         "vulnerabilities_checked": True,
         "warnings": ("an example warning",),
@@ -350,3 +365,33 @@ def test_severity_is_carried_through_from_a_vector() -> None:
     rating = document["vulnerabilities"][0]["ratings"][0]
     assert rating["method"] == "CVSSv31"
     assert rating["score"] == 7.5
+
+
+def test_sarif_marks_a_suppressed_result_rather_than_dropping_it() -> None:
+    """Dropped, GitHub would close the alert as fixed. Marked, it shows as dismissed."""
+    document = sarif.to_dict(sample_report())
+    result = result_for(document, "GHSA-cccc")
+    assert result["suppressions"] == [
+        {
+            "kind": "external",
+            "status": "accepted",
+            "justification": "Unreachable: the affected parser is never called",
+        }
+    ]
+
+
+def test_sarif_omits_suppressions_entirely_when_nothing_was_accepted() -> None:
+    assert "suppressions" not in result_for(sarif.to_dict(sample_report()), "GHSA-aaaa")
+
+
+def test_cyclonedx_records_an_accepted_finding_without_claiming_it_is_unaffected() -> (
+    None
+):
+    """``state`` is a closed enum of security claims we cannot make from free text."""
+    document = cyclonedx.to_dict(sample_report(), include_vulnerabilities=True)
+    entry = next(v for v in document["vulnerabilities"] if v["id"] == "GHSA-cccc")
+    assert "Unreachable" in entry["analysis"]["detail"]
+    assert "state" not in entry["analysis"]
+
+    properties = {p["name"]: p["value"] for p in document["metadata"]["properties"]}
+    assert properties["icebergsca:suppressedCount"] == "1"

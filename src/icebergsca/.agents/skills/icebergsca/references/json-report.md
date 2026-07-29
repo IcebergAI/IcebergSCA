@@ -12,13 +12,14 @@ icebergsca scan . --format json --output report.json
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "tool": { "name": "icebergsca", "version": "0.1.0" },
   "scan": { ... },
   "summary": { ... },
   "manifests": [ ... ],
   "dependencies": [ ... ],
   "findings": [ ... ],
+  "suppressed": [ ... ],
   "unchecked_packages": [ ... ],
   "skipped": [ ... ],
   "warnings": [ ... ]
@@ -53,6 +54,7 @@ it means the tool did its job.
 {
   "dependencies": 21, "direct": 9, "transitive": 12, "packages": 21,
   "findings": 12,
+  "suppressed": 2,
   "by_severity": { "critical": 3, "high": 4, "medium": 4, "low": 1 },
   "unchecked_packages": 0,
   "skipped_files": 0
@@ -63,7 +65,12 @@ it means the tool did its job.
 manifests appears twice. `packages` counts unique packages. Use `packages` when reporting
 "we checked N packages".
 
-`by_severity` omits levels with no findings and is ordered most severe first.
+`findings` counts only findings nobody has accepted; `suppressed` counts the rest. The total in
+the `findings` array is the two added together. **A suppressed finding is not a fixed one** —
+somebody recorded a reason for accepting it and a date to revisit. Say so when reporting.
+
+`by_severity` omits levels with no findings and is ordered most severe first. It counts active
+findings only, for the same reason.
 
 ## `manifests`
 
@@ -144,11 +151,12 @@ One entry per ecosystem-and-directory scan unit.
   "direct": true,
   "introduced_by": [
     { "path": "requirements.txt", "line": 3, "scope": "runtime", "direct": true }
-  ]
+  ],
+  "suppression": null
 }
 ```
 
-Sorted most severe first, then by package name.
+Sorted active first, then most severe, then by package name.
 
 * `severity.level`: `critical`, `high`, `medium`, `low`, `none`, `unknown`. `unknown` means the
   advisory carries no rating — distinct from `none`, which is a scored zero.
@@ -159,6 +167,31 @@ Sorted most severe first, then by package name.
   removal, not upgrade.
 * One CVE reported by several advisory databases is merged into a **single** finding, keeping
   whichever record carried the severity and fix version. The other IDs appear in `aliases`.
+* `suppression` is `null` unless an ignore-file entry accepted the finding, in which case it
+  carries `reason`, `expires` and `rule`. **Read this field.** A suppressed finding is still in
+  this array — it is deliberately not removed — so code that ignores `suppression` counts it as
+  outstanding, and code that filters on it must not describe the result as "no vulnerabilities".
+
+## `suppressed`
+
+The ignore rules that fired, and what each accepted. This is an audit trail, not a second copy
+of the findings — the per-finding state is `findings[].suppression`.
+
+```json
+"suppressed": [
+  {
+    "rule": "GHSA-6757-jp84-gxfx@pkg:pypi/pyyaml",
+    "reason": "Unreachable: we never call yaml.load on untrusted input",
+    "expires": "2026-10-27",
+    "findings": [{ "advisory": "GHSA-6757-jp84-gxfx", "purl": "pkg:pypi/pyyaml@5.1" }]
+  }
+]
+```
+
+A rule that matched nothing, or one that has expired, does not appear here — it produces a
+`warnings` entry instead, because a rule doing no work is usually a typo or an entry left behind
+after the upgrade that fixed it. An expired entry stops suppressing, so the finding returns to
+the active count.
 
 ## `unchecked_packages`, `skipped` and `warnings`
 

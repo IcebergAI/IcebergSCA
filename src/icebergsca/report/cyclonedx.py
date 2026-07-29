@@ -99,6 +99,10 @@ def _metadata(report: ScanReport) -> dict[str, Any]:
                 "value": str(report.vulnerabilities_checked).lower(),
             },
             {"name": "icebergsca:complete", "value": str(report.is_complete).lower()},
+            {
+                "name": "icebergsca:suppressedCount",
+                "value": str(len(report.suppressed_findings)),
+            },
         ],
     }
 
@@ -188,6 +192,16 @@ def _vulnerability(finding: Finding) -> dict[str, Any]:
         entry["recommendation"] = (
             f"Upgrade {finding.package.name} to {finding.fixed_version} or later."
         )
+    if finding.suppression is not None:
+        # Only ``detail``. CycloneDX's ``state`` and ``justification`` are closed
+        # enumerations of security claims — ``not_affected``, ``code_not_reachable``
+        # and so on — and all this tool actually knows is that a human wrote a sentence
+        # and a date. Asserting one of those values from free text would be inventing
+        # an analysis nobody performed.
+        entry["analysis"] = {
+            "detail": f"Accepted until {finding.suppression.expires.isoformat()}: "
+            f"{finding.suppression.reason}"
+        }
 
     return entry
 

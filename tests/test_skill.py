@@ -107,6 +107,9 @@ def test_skill_name_matches_the_distribution() -> None:
         "vulnerabilities_checked",
         "unchecked_packages",
         "--format json",
+        # An accepted finding read as a fixed one is the second way to produce a
+        # false clean, so it belongs in the same guard as the first.
+        "suppressed",
     ],
 )
 def test_skill_teaches_the_false_clean_checks(claim: str) -> None:

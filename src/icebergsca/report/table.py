@@ -144,19 +144,28 @@ def _render_findings(console: Console, report: ScanReport) -> None:
     table.add_column("Advisory")
     table.add_column("Fixed in")
     table.add_column("Via")
+    table.add_column("")
 
     for finding in report.sorted_findings():
-        style = _SEVERITY_STYLE[finding.level]
+        # Suppressed rows are dimmed rather than dropped, and keep their real severity
+        # so that nobody reads an accepted critical as a medium.
+        style = "dim" if finding.is_suppressed else _SEVERITY_STYLE[finding.level]
         table.add_row(
             f"[{style}]{finding.level.value}[/{style}]",
-            escape(finding.package.name),
+            f"[{style}]{escape(finding.package.name)}[/{style}]",
             escape(finding.package.version or "?"),
             escape(_advisory_label(finding)),
             escape(finding.fixed_version or "—"),
             escape(_via_label(finding)),
+            "[dim]accepted[/dim]" if finding.is_suppressed else "",
         )
 
     console.print(table)
+    if report.suppressed_findings:
+        console.print(
+            "[dim]accepted — matched an entry in the ignore file; still reported, "
+            "and excluded from the counts below and from --fail-on[/dim]"
+        )
     console.print()
     _render_summary(console, report)
 
@@ -179,9 +188,15 @@ def _render_summary(console: Console, report: ScanReport) -> None:
         f"[{_SEVERITY_STYLE[level]}]{count} {level.value}[/{_SEVERITY_STYLE[level]}]"
         for level, count in report.counts_by_severity().items()
     ]
-    console.print(
-        f"[bold]{len(report.findings)} finding(s):[/bold] " + "  ".join(parts)
-    )
+    # The headline number counts what is still outstanding. Accepted findings are named
+    # separately rather than folded in or dropped: rolled into the total they would look
+    # like work nobody has done, and omitted entirely they would look like work that
+    # never existed.
+    suppressed = len(report.suppressed_findings)
+    line = f"[bold]{len(report.active_findings)} finding(s):[/bold] " + "  ".join(parts)
+    if suppressed:
+        line += f"  [dim]· {suppressed} accepted[/dim]"
+    console.print(line)
     console.print()
 
 

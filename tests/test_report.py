@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import date
 from io import StringIO
 from pathlib import Path
 
@@ -169,7 +170,7 @@ def test_json_document_shape() -> None:
     )
     document = json.loads(render(report, OutputFormat.JSON))
 
-    assert document["schema_version"] == "1.0"
+    assert document["schema_version"] == "1.1"
     assert document["tool"]["name"] == "icebergsca"
     assert document["summary"]["findings"] == 1
     assert document["summary"]["by_severity"] == {"high": 1}
@@ -352,3 +353,103 @@ def test_json_records_what_a_dependency_excludes() -> None:
     )
     payload = json.loads(render(report, OutputFormat.JSON))
     assert payload["dependencies"][0]["exclusions"] == ["com.lowagie:itext"]
+
+
+def suppressed_finding(**overrides: object) -> Finding:
+    from icebergsca.core.models import Suppression
+
+    defaults: dict[str, object] = {
+        "package": PackageRef(EcosystemId.PYPI, "pyyaml", "5.1"),
+        "advisory": make_advisory(),
+        "suppression": Suppression(
+            reason="Unreachable from our code paths",
+            expires=date(2026, 10, 27),
+            rule="GHSA-xxxx-yyyy-zzzz@pyyaml",
+        ),
+    }
+    return Finding(**{**defaults, **overrides})  # type: ignore[arg-type]
+
+
+def test_a_fully_suppressed_report_never_reads_as_clean() -> None:
+    """The load-bearing one.
+
+    If suppressed findings were filtered out of ``findings`` rather than marked, this
+    report would take the empty-findings branch and print "No known vulnerabilities" —
+    turning an accepted vulnerability into a clean bill of health.
+    """
+    output = table_of(
+        {
+            "dependencies": (make_dependency(),),
+            "vulnerabilities_checked": True,
+            "findings": (suppressed_finding(),),
+        }
+    )
+    assert "No known vulnerabilities" not in output
+    assert "accepted" in output
+
+
+def test_the_summary_counts_accepted_findings_separately() -> None:
+    output = table_of(
+        {
+            "dependencies": (make_dependency(),),
+            "vulnerabilities_checked": True,
+            "findings": (
+                suppressed_finding(),
+                Finding(
+                    package=PackageRef(EcosystemId.PYPI, "flask", "2.0"),
+                    advisory=make_advisory("GHSA-live"),
+                ),
+            ),
+        }
+    )
+    assert "1 finding(s)" in output
+    assert "1 accepted" in output
+
+
+def test_the_accepted_marker_is_explained_rather_than_left_bare() -> None:
+    output = table_of(
+        {
+            "dependencies": (make_dependency(),),
+            "vulnerabilities_checked": True,
+            "findings": (suppressed_finding(),),
+        }
+    )
+    assert "ignore file" in output
+
+
+def test_json_carries_the_suppression_on_the_finding_and_in_the_audit_trail() -> None:
+    report = make_report(vulnerabilities_checked=True, findings=(suppressed_finding(),))
+    document = json.loads(render(report, OutputFormat.JSON))
+
+    entry = document["findings"][0]["suppression"]
+    assert entry["reason"] == "Unreachable from our code paths"
+    assert entry["expires"] == "2026-10-27"
+
+    assert document["summary"]["findings"] == 0
+    assert document["summary"]["suppressed"] == 1
+    assert document["suppressed"][0]["rule"] == "GHSA-xxxx-yyyy-zzzz@pyyaml"
+
+
+def test_json_suppression_is_null_when_nothing_accepted_the_finding() -> None:
+    """Always present, so reading it is never optional."""
+    report = make_report(
+        vulnerabilities_checked=True,
+        findings=(
+            Finding(
+                package=PackageRef(EcosystemId.PYPI, "flask", "2.0"),
+                advisory=make_advisory(),
+            ),
+        ),
+    )
+    document = json.loads(render(report, OutputFormat.JSON))
+    assert document["findings"][0]["suppression"] is None
+    assert document["suppressed"] == []
+
+
+def test_csv_records_suppression_without_disturbing_existing_columns() -> None:
+    report = make_report(vulnerabilities_checked=True, findings=(suppressed_finding(),))
+    text = render(report, OutputFormat.CSV)
+    assert text.startswith("severity,cvss_score,advisory_id")
+    row = next(csv.DictReader(StringIO(text)))
+    assert row["suppressed"] == "true"
+    assert row["suppression_reason"] == "Unreachable from our code paths"

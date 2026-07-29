@@ -23,17 +23,26 @@ from icebergsca import __version__
 from icebergsca.cache import Cache, cache_path
 from icebergsca.core.discovery import DiscoveryOptions
 from icebergsca.core.errors import IcebergSCAError
-from icebergsca.core.models import EcosystemId, ScanReport, ScanStatus, Scope
+from icebergsca.core.models import (
+    EcosystemId,
+    ScanReport,
+    ScanStatus,
+    Scope,
+    SeverityLevel,
+)
 from icebergsca.core.scanner import DEFAULT_SCOPES, ScanOptions, scan
+from icebergsca.core.triage import IgnoreRule, parse_ignore_file
 from icebergsca.report import OutputFormat, cyclonedx, render
 
 
 class ExitCode(IntEnum):
     """Process exit codes.
 
-    Findings deliberately do not appear here. A scan that reports forty critical
-    vulnerabilities has done its job and exits :attr:`OK`; severity gating arrives
-    later as an explicit ``--fail-on`` flag.
+    Findings still do not affect the exit code on their own: a scan reporting forty
+    critical vulnerabilities has done its job and exits :attr:`OK`. They change it only
+    when the caller asked for a gate with ``--fail-on``, and even then under a code of
+    their own, so that "the gate tripped" stays distinguishable from "the scan broke".
+    A pipeline that cannot tell those apart eventually treats both as noise.
 
     :attr:`USAGE` is 2 rather than 1 because Typer's vendored Click reserves that
     code for usage errors, and remapping it would mean overriding framework
@@ -45,6 +54,10 @@ class ExitCode(IntEnum):
     #: to check. Results are incomplete and must not be read as a clean result.
     SCAN_FAILED = 1
     USAGE = 2
+    #: Findings at or above the ``--fail-on`` threshold. Only ever returned when that
+    #: flag was passed, and only for a scan that completed — an incomplete scan is
+    #: :attr:`SCAN_FAILED` regardless of what it managed to find.
+    FINDINGS = 3
 
 
 app = typer.Typer(
@@ -57,12 +70,69 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 
+#: The ignore file looked for beside the scan target when --ignore-file is absent.
+IGNORE_FILENAME = ".icebergsca.toml"
+
 logger = logging.getLogger("icebergsca")
 
 
 def _fail(message: str) -> NoReturn:
     typer.secho(f"error: {message}", fg=typer.colors.RED, err=True)
     raise typer.Exit(ExitCode.SCAN_FAILED)
+
+
+def _ignore_rules(path: Path, ignore_file: Path | None) -> tuple[IgnoreRule, ...]:
+    """Locate and read the ignore file, if there is one.
+
+    Reading it belongs here rather than in the scanner: it is tool configuration, not
+    scan input, and ``cli/`` is the only layer that touches either the filesystem for
+    its own purposes or the user directly.
+
+    An explicitly named file that does not exist is an error — the caller asked for it
+    by name and a silent fall-through to "nothing is suppressed" would be a surprise in
+    the dangerous direction. A missing default file is simply the normal case.
+    """
+    explicit = ignore_file is not None
+    target = ignore_file or _default_ignore_file(path)
+
+    if not target.is_file():
+        if explicit:
+            _fail(f"ignore file not found: {target}")
+        return ()
+
+    try:
+        content = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        _fail(f"could not read {target}: {exc.strerror or exc}")
+
+    try:
+        return parse_ignore_file(str(target), content)
+    except IcebergSCAError as exc:
+        _fail(str(exc))
+
+
+def _default_ignore_file(path: Path) -> Path:
+    """``.icebergsca.toml`` beside the scan target, or in it when it is a directory."""
+    return (path if path.is_dir() else path.parent) / IGNORE_FILENAME
+
+
+def _gate(report: ScanReport, threshold: SeverityLevel) -> None:
+    """Exit non-zero when an *unsuppressed* finding meets the threshold.
+
+    Suppressed findings are excluded by design: being able to accept one is what makes
+    gating safe to turn on in the first place, since otherwise a single unfixable
+    transitive advisory turns the build red every week until somebody deletes the job.
+    """
+    tripped = [f for f in report.active_findings if f.level.at_or_above(threshold)]
+    if not tripped:
+        return
+
+    typer.secho(
+        f"{len(tripped)} finding(s) at or above {threshold.value}",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(ExitCode.FINDINGS)
 
 
 def _configure_logging(verbosity: int, quiet: bool) -> None:
@@ -175,6 +245,22 @@ def scan_command(
     no_color: Annotated[
         bool, typer.Option("--no-color", help="Disable coloured output.")
     ] = False,
+    fail_on: Annotated[
+        SeverityLevel | None,
+        typer.Option(
+            "--fail-on",
+            help="Exit 3 when a finding at or above this severity is not suppressed. "
+            "An incomplete scan still exits 1, whatever it found.",
+        ),
+    ] = None,
+    ignore_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--ignore-file",
+            help=f"Accepted findings. Defaults to {IGNORE_FILENAME} beside the scan "
+            "target when it exists.",
+        ),
+    ] = None,
     verbose: Annotated[
         int, typer.Option("-v", "--verbose", count=True, help="Increase log verbosity.")
     ] = 0,
@@ -207,6 +293,7 @@ def scan_command(
         concurrency=concurrency,
         no_cache=no_cache,
         resolve_ranges=not no_resolve,
+        ignore_rules=_ignore_rules(path, ignore_file),
     )
 
     try:
@@ -216,6 +303,9 @@ def scan_command(
 
     _write(report, output_format, output, color=_use_color(no_color, output))
 
+    # Completeness first, always. A gate that passed an incomplete scan because it
+    # happened to find nothing is the false clean this tool exists to avoid, and it is
+    # the single easiest way to build one.
     if report.status is not ScanStatus.OK or report.scan_failed:
         typer.secho(
             "scan incomplete — some files or packages could not be checked",
@@ -223,6 +313,9 @@ def scan_command(
             err=True,
         )
         raise typer.Exit(ExitCode.SCAN_FAILED)
+
+    if fail_on is not None:
+        _gate(report, fail_on)
 
 
 def _use_color(no_color: bool, output: Path | None) -> bool:

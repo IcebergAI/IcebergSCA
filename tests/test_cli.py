@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
@@ -71,7 +72,7 @@ def test_output_file(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == ExitCode.OK
-    assert json.loads(destination.read_text())["schema_version"] == "1.0"
+    assert json.loads(destination.read_text())["schema_version"] == "1.1"
 
 
 def test_dev_dependencies_are_excluded_by_default(tmp_path: Path) -> None:
@@ -241,3 +242,185 @@ def test_cache_commands_report_a_failing_query_as_an_error(
     assert result.exit_code == ExitCode.SCAN_FAILED
     assert isinstance(result.exception, SystemExit)
     assert "disk is full" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Suppression and --fail-on
+# ---------------------------------------------------------------------------
+
+
+class _FindingTransport(httpx.AsyncBaseTransport):
+    """Answer OSV as though every queried package had one high-severity advisory."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/querybatch"):
+            body = json.loads(request.content or b'{"queries": []}')
+            results = [
+                {"vulns": [{"id": "GHSA-test", "modified": "2026-01-01T00:00:00Z"}]}
+                for _ in body.get("queries", [])
+            ]
+            return httpx.Response(200, json={"results": results}, request=request)
+        if "/v1/vulns/" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "GHSA-test",
+                    "modified": "2026-01-01T00:00:00Z",
+                    "aliases": ["CVE-2026-9999"],
+                    "summary": "Example",
+                    "severity": [
+                        {
+                            "type": "CVSS_V3",
+                            "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+                        }
+                    ],
+                },
+                request=request,
+            )
+        return httpx.Response(404, json={"error": "not mocked"}, request=request)
+
+
+@pytest.fixture
+def with_findings(monkeypatch: pytest.MonkeyPatch) -> None:
+    from icebergsca.core import scanner
+
+    monkeypatch.setattr(
+        scanner,
+        "build_http_client",
+        lambda options: httpx.AsyncClient(transport=_FindingTransport()),
+    )
+
+
+def one_package(tmp_path: Path) -> Path:
+    """A project with a single dependency, so one ignore entry covers everything."""
+    (tmp_path / "requirements.txt").write_text("requests==2.31.0\n")
+    return tmp_path
+
+
+def ignore_file(tmp_path: Path, **fields: str) -> Path:
+    entry = {
+        "advisory": "GHSA-test",
+        "package": "requests",
+        "reason": "Assessed: not reachable from our entry points",
+    } | fields
+    body = "\n".join(f'{key} = "{value}"' for key, value in entry.items())
+    target = tmp_path / ".icebergsca.toml"
+    target.write_text(f"[[ignore]]\n{body}\n")
+    return target
+
+
+def test_findings_alone_still_exit_zero(tmp_path: Path, with_findings: None) -> None:
+    """The design this feature must not undo: a finding is data, not a failure."""
+    result = runner.invoke(app, ["scan", str(project(tmp_path))])
+    assert result.exit_code == ExitCode.OK
+
+
+def test_fail_on_exits_three_above_the_threshold(
+    tmp_path: Path, with_findings: None
+) -> None:
+    result = runner.invoke(app, ["scan", str(project(tmp_path)), "--fail-on", "high"])
+    assert result.exit_code == ExitCode.FINDINGS
+
+
+def test_fail_on_exits_zero_below_the_threshold(
+    tmp_path: Path, with_findings: None
+) -> None:
+    result = runner.invoke(
+        app, ["scan", str(project(tmp_path)), "--fail-on", "critical"]
+    )
+    assert result.exit_code == ExitCode.OK
+
+
+def test_an_accepted_finding_does_not_trip_the_gate(
+    tmp_path: Path, with_findings: None
+) -> None:
+    """The whole point of pairing the two: gating is only safe once you can accept."""
+    target = one_package(tmp_path)
+    ignore_file(target)
+    result = runner.invoke(app, ["scan", str(target), "--fail-on", "high"])
+    assert result.exit_code == ExitCode.OK
+
+
+def test_an_expired_entry_trips_the_gate_again(
+    tmp_path: Path, with_findings: None
+) -> None:
+    target = one_package(tmp_path)
+    ignore_file(target, expires="2020-01-01")
+    result = runner.invoke(app, ["scan", str(target), "--fail-on", "high"])
+    assert result.exit_code == ExitCode.FINDINGS
+
+
+def test_an_incomplete_scan_exits_one_not_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The false-clean trap, from the other side.
+
+    Completeness is checked before the gate, so a scan that could not look anything up
+    fails as a broken scan — never passing because it happened to find nothing, and
+    never reported as a policy failure it did not actually establish.
+    """
+    from icebergsca.core import scanner
+    from icebergsca.osv import client as client_module
+
+    # Same collapse as tests/test_osv.py: the retry schedule is asserted there, and
+    # paying it in real seconds here would put the suite over its time budget.
+    monkeypatch.setattr(client_module, "_BACKOFF_BASE", 0.0001)
+    monkeypatch.setattr(client_module, "_BACKOFF_CAP", 0.001)
+
+    class _Unreachable(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(
+        scanner,
+        "build_http_client",
+        lambda options: httpx.AsyncClient(transport=_Unreachable()),
+    )
+    result = runner.invoke(
+        app, ["scan", str(project(tmp_path)), "--fail-on", "critical"]
+    )
+    assert result.exit_code == ExitCode.SCAN_FAILED
+
+
+def test_a_suppressed_finding_is_still_reported(
+    tmp_path: Path, with_findings: None
+) -> None:
+    target = one_package(tmp_path)
+    ignore_file(target)
+    result = runner.invoke(app, ["scan", str(target), "--format", "json"])
+    document = json.loads(result.stdout)
+
+    assert document["summary"]["suppressed"] == 1
+    assert any(f["suppression"] for f in document["findings"])
+
+
+def test_an_unreadable_ignore_file_named_explicitly_is_an_error(
+    tmp_path: Path,
+) -> None:
+    """Asking for a file by name and silently getting no rules is the wrong surprise."""
+    result = runner.invoke(
+        app,
+        ["scan", str(project(tmp_path)), "--ignore-file", str(tmp_path / "nope.toml")],
+    )
+    assert result.exit_code == ExitCode.SCAN_FAILED
+    assert "not found" in result.stderr
+
+
+def test_a_malformed_ignore_file_fails_loudly(tmp_path: Path) -> None:
+    target = project(tmp_path)
+    (target / ".icebergsca.toml").write_text('[[ignore]]\nadvisroy = "x"\n')
+    result = runner.invoke(app, ["scan", str(target)])
+    assert result.exit_code == ExitCode.SCAN_FAILED
+    assert "advisroy" in result.stderr
+
+
+def test_unknown_fail_on_severity_is_a_usage_error(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["scan", str(project(tmp_path)), "--fail-on", "catastrophic"]
+    )
+    assert result.exit_code == ExitCode.USAGE
+
+
+def test_fail_on_choices_are_listed_in_help() -> None:
+    result = runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
+    assert "critical|high|medium|low|none|unknown" in plain(result.stdout)

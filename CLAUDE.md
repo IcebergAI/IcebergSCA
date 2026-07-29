@@ -146,6 +146,27 @@ schema validation in `tests/test_report_formats.py` against the official schemas
 
 **Exit code 2 is usage, 1 is scan failure** — the reverse of the original plan, because Click
 reserves 2 for usage errors and remapping it means overriding framework internals for nothing.
+`--fail-on` gets its own code 3 rather than reusing 1: a pipeline that cannot tell "the scanner
+broke" from "the scanner found something" ends up treating both as noise, which is the same
+failure `|| true` represents.
+
+**Suppression and gating shipped together, deliberately.** `--fail-on` alone turns a single
+unfixable transitive advisory into a build that is red every week forever, and a job that is
+always red gets `|| true` or gets deleted. The ignore file is what makes the gate survivable.
+The safeguards in `core/triage.py` all follow from it being the one feature whose job is to
+remove findings: a suppressed finding stays in `ScanReport.findings` marked rather than being
+filtered out (so `table.py`'s `if not report.findings` branch cannot print "no known
+vulnerabilities" for an all-suppressed scan — `test_a_fully_suppressed_report_never_reads_as_clean`
+guards exactly that), `reason` is mandatory, expiry defaults rather than being optional, matching
+is exact on advisory-or-alias plus package, and a rule matching nothing becomes a warning.
+
+**`parse_ignore_file` is strict where every other parser is forgiving.** Ecosystem parsers skip
+what they cannot read, because a third-party manifest is not ours to police. The ignore file is
+the user's own and decides which vulnerabilities they stop seeing, so an unknown key is a
+`ConfigError` rather than a silent skip.
+
+**`SeverityLevel` is a `StrEnum`, so `<` compares strings** — `HIGH < LOW` is True. Use
+`at_or_above()` or `.rank`; never compare members directly.
 
 ## Testing
 
@@ -168,7 +189,10 @@ and versions. This has caught two real bugs (a missing `coverage[toml]` extra tr
 
 ## Known gaps
 
-- `--fail-on <severity>` and an ignore/triage file — the obvious next feature.
+- The ignore file suppresses; it does not yet express "not exploitable" in VEX terms.
+  `cyclonedx.py` emits `analysis.detail` only, because `state` and `justification` are closed
+  enums of security claims a free-text reason cannot back. An optional validated `state` key on
+  the entry is the obvious next step.
 - No SPDX output; CycloneDX only.
 - No SBOM *ingest*.
 - npm/yarn v1 lockfiles record no scope, so dev transitives are reported as runtime unless a

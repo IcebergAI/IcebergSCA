@@ -16,13 +16,13 @@ Two conventions worth stating up front:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
 
 from packageurl import PackageURL
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 # ---------------------------------------------------------------------------
 # Ecosystems
@@ -148,6 +148,15 @@ class SeverityLevel(StrEnum):
     def rank(self) -> int:
         """Sort key, highest severity first when sorting descending."""
         return _SEVERITY_RANK[self]
+
+    def at_or_above(self, threshold: SeverityLevel) -> bool:
+        """True when this level is at least as severe as ``threshold``.
+
+        Use this rather than comparing members. ``SeverityLevel`` is a ``StrEnum``, so
+        ``<`` and ``>`` compare the *strings*: ``HIGH < LOW`` is True because ``"high"``
+        sorts before ``"low"``, which is exactly backwards and silently so.
+        """
+        return self.rank >= threshold.rank
 
 
 _SEVERITY_RANK: dict[SeverityLevel, int] = {
@@ -333,6 +342,25 @@ class Advisory:
 
 
 @dataclass(frozen=True, slots=True)
+class Suppression:
+    """A human's recorded decision to accept a finding, from the ignore file.
+
+    Note what this is not: a statement that the finding is wrong, or fixed, or that the
+    package is unaffected. It records only that someone looked and wrote down why, with
+    a date by which they intend to look again.
+    """
+
+    #: Why the finding was accepted. Required — an entry with no justification is
+    #: indistinguishable from a mistake six months later.
+    reason: str
+    #: When the decision lapses. After this date the finding surfaces again.
+    expires: date
+    #: The ignore entry that matched, as ``advisory@package``, so a reader can find
+    #: the rule responsible without diffing the file.
+    rule: str
+
+
+@dataclass(frozen=True, slots=True)
 class Finding:
     """One advisory affecting one package, with every path that introduced it."""
 
@@ -341,10 +369,19 @@ class Finding:
     #: Lowest fixed version above the installed one, or ``None`` if no fix is known.
     fixed_version: str | None = None
     introduced_by: tuple[Dependency, ...] = ()
+    #: Set when an ignore rule matched. A suppressed finding stays in the report and
+    #: stays in :attr:`ScanReport.findings`; only the counts and the exit-code gate
+    #: treat it differently. Removing it from the list would let an all-suppressed
+    #: scan render as "no known vulnerabilities".
+    suppression: Suppression | None = None
 
     @property
     def level(self) -> SeverityLevel:
         return self.advisory.level
+
+    @property
+    def is_suppressed(self) -> bool:
+        return self.suppression is not None
 
     @property
     def is_direct(self) -> bool:
@@ -448,18 +485,43 @@ class ScanReport:
             and self.status is ScanStatus.OK
         )
 
+    @property
+    def active_findings(self) -> tuple[Finding, ...]:
+        """Findings nobody has accepted — what a build should be judged on."""
+        return tuple(f for f in self.findings if not f.is_suppressed)
+
+    @property
+    def suppressed_findings(self) -> tuple[Finding, ...]:
+        """Findings an ignore rule accepted. Still reported, never discarded."""
+        return tuple(f for f in self.findings if f.is_suppressed)
+
     def counts_by_severity(self) -> dict[SeverityLevel, int]:
-        """Finding counts per severity, highest first, omitting empty levels."""
+        """Active finding counts per severity, highest first, omitting empty levels.
+
+        Suppressed findings are excluded — they are counted separately rather than
+        folded in, so that "3 high" means three someone still has to deal with. With
+        no ignore file in play this is every finding, exactly as before.
+        """
         counts: dict[SeverityLevel, int] = {}
-        for finding in self.findings:
+        for finding in self.active_findings:
             counts[finding.level] = counts.get(finding.level, 0) + 1
         return dict(sorted(counts.items(), key=lambda item: item[0].rank, reverse=True))
 
     def sorted_findings(self) -> tuple[Finding, ...]:
-        """Findings ordered most severe first, then by package for stable output."""
+        """Findings ordered active first, then most severe, then by package.
+
+        Suppressed findings sort last rather than being dropped: every renderer walks
+        this list, and one that stopped seeing them would report an accepted finding
+        as a fixed one.
+        """
         return tuple(
             sorted(
                 self.findings,
-                key=lambda f: (-f.level.rank, f.package.name, f.advisory.id),
+                key=lambda f: (
+                    f.is_suppressed,
+                    -f.level.rank,
+                    f.package.name,
+                    f.advisory.id,
+                ),
             )
         )

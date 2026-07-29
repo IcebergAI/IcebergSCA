@@ -22,6 +22,7 @@ import httpx
 
 from icebergsca import __version__
 from icebergsca.cache import Cache
+from icebergsca.core import triage
 from icebergsca.core.discovery import Discovery, DiscoveryOptions, ScanUnit, discover
 from icebergsca.core.errors import CacheError, ParseError
 from icebergsca.core.graph import most_included
@@ -37,6 +38,7 @@ from icebergsca.core.models import (
     Scope,
     SkippedFile,
 )
+from icebergsca.core.triage import IgnoreRule
 from icebergsca.ecosystems import get as get_ecosystem
 from icebergsca.ecosystems.base import FileParser
 from icebergsca.ecosystems.maven import MavenResolver, MavenResult, MavenUnit
@@ -75,6 +77,10 @@ class ScanOptions:
     #: findings — and the report says so via ``vulnerabilities_checked`` rather than
     #: presenting an empty finding list as a clean result.
     check_vulnerabilities: bool = True
+    #: Accepted findings, already parsed. A plain value like every other option: the
+    #: CLI locates and reads ``.icebergsca.toml``, because tool configuration is its
+    #: business, not the scanner's.
+    ignore_rules: tuple[IgnoreRule, ...] = ()
 
 
 async def scan(root: Path, options: ScanOptions | None = None) -> ScanReport:
@@ -232,12 +238,18 @@ async def _resolve_and_check(
         for ref, hits in result.advisories.items()
         for hit in hits
     )
+    # Applied here, at the one place findings are built, so the accepted ones are the
+    # same objects the report ships. Note this is below the ``check_vulnerabilities``
+    # early return above: there is nothing to accept when nothing was looked up, and
+    # marking an empty list as triaged would be a clean result nobody earned.
+    findings, ignore_warnings = triage.apply(findings, options.ignore_rules)
+
     return _VulnOutcome(
         dependencies,
         findings,
         result,
         checked=True,
-        warnings=warnings,
+        warnings=warnings + ignore_warnings,
         maven_approximate=maven.approximate,
     )
 

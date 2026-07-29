@@ -4,16 +4,54 @@
 
 Findings never change the exit code. A non-zero exit means the scan itself did not complete.
 
+Findings never change the exit code unless you ask them to with `--fail-on`.
+
 | Code | Meaning | Pipeline response |
 |---|---|---|
 | `0` | Scan completed | Read `summary.findings` to decide what to do |
 | `1` | Scan failed or partial | Fail the job — the result is not trustworthy |
 | `2` | Usage error | Fix the invocation |
+| `3` | `--fail-on` threshold met | Fail the job — the scan worked, the result did not pass |
 
-This is deliberate: a scanner that exits non-zero on findings gets `|| true` appended within a
-week, at which point genuine tool failures also go unnoticed.
+`1` and `3` are separate on purpose. A pipeline that cannot tell "the scanner broke" from "the
+scanner found something" ends up treating both as noise.
 
-To gate on severity today, read the JSON:
+```bash
+icebergsca scan . --fail-on critical
+```
+
+The gate checks completeness first, so it can never pass a scan that failed to look anything
+up, and it ignores findings accepted in the ignore file. Do not add `|| true`: that is what
+the ignore file is for.
+
+## Accepting a finding
+
+The scheduled run below matters because most new findings arrive when an advisory is published,
+not when the code changes. Which means one unfixable transitive advisory would otherwise turn
+the build red every week forever — and a job that is red every week gets deleted.
+
+`.icebergsca.toml` in the project root records the assessment instead:
+
+```toml
+[[ignore]]
+advisory = "GHSA-6757-jp84-gxfx"   # or the CVE — aliases are matched too
+package  = "pyyaml"                 # bare name, or a purl, optionally versioned
+reason   = "Unreachable: we never call yaml.load on untrusted input"
+expires  = 2026-10-27               # optional; defaults to 90 days from the scan
+```
+
+Point elsewhere with `--ignore-file`. What it does not do is hide anything: the finding stays
+in the report with a `suppression` object, `summary.suppressed` counts it, SARIF marks it
+dismissed rather than fixed, and `--fail-on` skips it. When the entry expires the finding comes
+back — expiry never fails a scan by itself.
+
+A rule that matches nothing, or one past its date, lands in `warnings`. Watch for those: they
+mean a typo, or an entry left behind after the upgrade that already fixed it.
+
+### Gating without `--fail-on`
+
+Reading the JSON still works, and is the way to gate on something more specific. Check
+`scan.complete` **first** — gating on findings alone would pass a scan that checked nothing:
 
 ```bash
 icebergsca scan . --format json --output report.json
@@ -22,10 +60,7 @@ jq -e '(.summary.by_severity.critical // 0) == 0' report.json > /dev/null \
   || { echo "critical vulnerabilities found"; exit 1; }
 ```
 
-Check `scan.complete` **first**. Gating on findings alone would pass a scan that failed to
-check anything.
-
-A built-in `--fail-on <severity>` flag is planned but not yet implemented.
+`summary.by_severity` counts active findings only, so accepted ones are already excluded.
 
 ## GitHub code scanning
 
