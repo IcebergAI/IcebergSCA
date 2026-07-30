@@ -34,6 +34,14 @@ GO = EcosystemId.GO
         (NPM, "1.0.0-alpha", "1.0.0-beta"),
         (PYPI, "1.0.0rc1", "1.0.0"),
         (PYPI, "2.0", "10.0"),
+        # Numeric pre-release comparison: stringified, rc10 sorts below rc2.
+        (PYPI, "1.0.0rc2", "1.0.0rc10"),
+        (PYPI, "1.0.0a2", "1.0.0b1"),
+        # PEP 440: dev releases sort below any alpha, post releases above the final.
+        (PYPI, "1.0.0.dev1", "1.0.0a1"),
+        (PYPI, "1.0.0", "1.0.0.post1"),
+        # An epoch outranks any release number.
+        (PYPI, "2.0.0", "1!1.0.0"),
         (GO, "v1.2.3", "v1.3.0"),
         (GEM, "1.2.3", "1.2.10"),
     ],
