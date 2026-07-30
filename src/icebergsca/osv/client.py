@@ -109,8 +109,11 @@ class OSVClient:
                     advisory=_advisory(record),
                     fixed_version=severity_module.fixed_version(record, ref),
                 )
-                for entry in entries
+                # querybatch already said this advisory affects the package; a failed
+                # detail fetch costs the severity and fix version, never the finding.
                 if (record := details.get(_detail_key(entry))) is not None
+                else VulnHit(advisory=_skeleton(entry))
+                for entry in entries
             ]
             if hits:
                 merged = merge_aliases(hits)
@@ -461,6 +464,16 @@ def _query_key(ref: PackageRef) -> str:
 def _detail_key(entry: dict[str, str]) -> str:
     """Cache key for advisory detail — exact, because ``modified`` is part of it."""
     return f"{entry['id']}@{entry.get('modified', '')}"
+
+
+def _skeleton(entry: dict[str, str]) -> Advisory:
+    """An advisory built from querybatch data alone, for when detail never arrived.
+
+    Carries only the ID and modified timestamp, so it renders with an unknown
+    severity and no fix version — under-informed, but reported. Dropping the hit
+    instead would present a package OSV said is affected as if it were clean.
+    """
+    return Advisory(id=entry["id"], modified=entry.get("modified", ""))
 
 
 def _advisory(record: dict[str, Any]) -> Advisory:
