@@ -136,6 +136,31 @@ def test_uv_lock_records_parents() -> None:
     assert [ref.name for ref in deps["idna"].parents] == ["anyio"]
 
 
+def test_uv_lock_merges_scopes_across_groups_by_inclusion() -> None:
+    """A package in both a dev-flavoured extra and an ordinary one installs whenever
+    either is asked for, so the most-included scope must win — first-wins would let
+    the ``docs`` group hide it from the default scan."""
+    content = """\
+version = 1
+
+[[package]]
+name = "example-app"
+version = "0.1.0"
+source = { editable = "." }
+
+[package.optional-dependencies]
+docs = [{ name = "sphinx" }]
+gui = [{ name = "sphinx" }]
+
+[[package]]
+name = "sphinx"
+version = "7.0.0"
+source = { registry = "https://pypi.org/simple" }
+"""
+    deps = {d.ref.name: d for d in python.parse_lockfile(Path("uv.lock"), content)}
+    assert deps["sphinx"].scope is Scope.OPTIONAL
+
+
 def test_uv_lock_rejects_a_file_with_no_packages() -> None:
     with pytest.raises(ParseError, match="no \\[\\[package\\]\\] entries"):
         python.parse_lockfile(Path("uv.lock"), "version = 1\n")
@@ -200,6 +225,21 @@ def test_pipfile_manifest_reads_both_sections() -> None:
     assert deps["flask"].constraint is None
 
 
+def test_pipfile_wildcard_equality_is_a_range_not_a_pin() -> None:
+    """``==2.*`` sliced to the "version" ``2.*`` would be sent to OSV, match no
+    advisory range, and read as clean. ``===2.0.0`` is the opposite case: a real
+    pin that the naive slice mangled into ``=2.0.0``."""
+    content = '[packages]\nrequests = "==2.*"\nflask = "===2.0.0"\n'
+    deps = {d.ref.name: d for d in python.parse_manifest(Path("Pipfile"), content)}
+
+    assert deps["requests"].ref.version is None
+    assert deps["requests"].pin is Pin.UNRESOLVED
+    assert deps["requests"].constraint == "==2.*"
+
+    assert deps["flask"].ref.version == "2.0.0"
+    assert deps["flask"].pin is Pin.PINNED
+
+
 # ---------------------------------------------------------------------------
 # package.json
 # ---------------------------------------------------------------------------
@@ -260,6 +300,27 @@ def test_lock_v3_uses_npms_own_scope_flags() -> None:
     assert deps["jest"].scope is Scope.DEV
     assert deps["chalk"].scope is Scope.DEV
     assert deps["fsevents"].scope is Scope.OPTIONAL
+
+
+def test_lock_v3_dev_optional_still_ships() -> None:
+    """npm's devOptional flag means "dev tree *and* optional dep of something that
+    ships" — a production install still gets it, so it must not be classed as dev,
+    which the default scan excludes."""
+    content = """{
+      "lockfileVersion": 3,
+      "packages": {
+        "": {"dependencies": {"sharp": "^0.33.0"}},
+        "node_modules/sharp": {
+          "version": "0.33.0",
+          "dependencies": {"detect-libc": "^2.0.0"}
+        },
+        "node_modules/detect-libc": {"version": "2.0.3", "devOptional": true}
+      }
+    }"""
+    deps = {
+        d.ref.name: d for d in npm.parse_lockfile(Path("package-lock.json"), content)
+    }
+    assert deps["detect-libc"].scope is Scope.OPTIONAL
 
 
 def test_lock_v3_marks_root_dependencies_direct() -> None:
@@ -407,6 +468,13 @@ def test_yarn_v1_resolves_edges_through_the_descriptor_index() -> None:
     )
     nested = next(d for d in parsed if d.ref.name == "ms" and d.ref.version == "2.0.0")
     assert [ref.name for ref in nested.parents] == ["debug"]
+
+
+def test_yarn_v1_reads_quoted_scoped_dependency_edges() -> None:
+    """yarn quotes scoped packages in dependency lists — ``"@scope/widget" "^2.0.0"``
+    — and a key pattern that cannot match the quotes drops every such edge."""
+    deps = load("npm", "yarn-v1", "yarn.lock")
+    assert [ref.name for ref in deps["@scope/widget"].parents] == ["app-ui"]
 
 
 def test_yarn_v1_keeps_both_resolved_versions() -> None:

@@ -30,7 +30,9 @@ from icebergsca.core.models import (
 from icebergsca.ecosystems.base import EcosystemSpec, FileSpec, build_dependencies
 
 #: NuGet version ranges use interval notation: ``[1.0,2.0)``, ``[1.0]``, ``(1.0,)``.
-#: A bare version means "this or newer", so only bracketed equality is a true pin.
+#: A bare version formally means "this or newer", but NuGet restores the *lowest*
+#: version that satisfies a range, which is the declared version itself whenever it
+#: exists — so a bare version is treated as a pin, and bracketed forms as ranges.
 _RANGE_CHARS = "[]()"
 
 #: ``PackageReference`` items whose asset flags exclude them from the compiled

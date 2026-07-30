@@ -352,6 +352,40 @@ async def test_imported_boms_supply_versions() -> None:
     assert entry.ref.version == "3.3"
 
 
+async def test_mutually_importing_boms_terminate() -> None:
+    """A cycle of import-scoped BOMs is cut, not recursed into until the stack dies.
+
+    Central should never serve one, but the resolver must not bet its stack on
+    that — and the versions gathered on the way down still apply.
+    """
+    import_bom = (
+        "<dependency><groupId>g</groupId><artifactId>{a}</artifactId>"
+        "<version>1.0</version><type>pom</type><scope>import</scope></dependency>"
+    )
+    responses = {
+        f"GET:{pom_url('g', 'a', '1.0')}": pom_xml(
+            "g",
+            "a",
+            "1.0",
+            management=import_bom.format(a="bom-x"),
+            dependencies=dep_xml("g", "from-bom", ""),
+        ),
+        f"GET:{pom_url('g', 'bom-x', '1.0')}": pom_xml(
+            "g",
+            "bom-x",
+            "1.0",
+            management=import_bom.format(a="bom-y") + dep_xml("g", "from-bom", "3.3"),
+        ),
+        f"GET:{pom_url('g', 'bom-y', '1.0')}": pom_xml(
+            "g", "bom-y", "1.0", management=import_bom.format(a="bom-x")
+        ),
+        f"GET:{pom_url('g', 'from-bom', '3.3')}": pom_xml("g", "from-bom", "3.3"),
+    }
+    result = await resolver(responses).expand((direct("g:a", "1.0"),))
+    entry = next(d for d in result.dependencies if d.ref.name == "g:from-bom")
+    assert entry.ref.version == "3.3"
+
+
 async def test_unreachable_central_degrades_to_direct_dependencies() -> None:
     """Losing the network costs depth, never correctness of what we already had."""
     result = await resolver({}).expand((direct("g:a", "1.0"),))

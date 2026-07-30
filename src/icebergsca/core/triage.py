@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from icebergsca.core.errors import ConfigError
@@ -204,6 +204,11 @@ def _expires(path: str, where: str, value: Any, today: date) -> date:
     """
     if value is None:
         return today + timedelta(days=DEFAULT_EXPIRY_DAYS)
+    if isinstance(value, datetime):
+        # TOML also has datetime types, and ``datetime`` *is a* ``date`` — but one
+        # that ``today > expires`` cannot compare against, which would turn a legal
+        # ``expires = 2026-10-27 00:00:00`` into a crash at matching time.
+        return value.date()
     if isinstance(value, date):
         return value
     if isinstance(value, str):

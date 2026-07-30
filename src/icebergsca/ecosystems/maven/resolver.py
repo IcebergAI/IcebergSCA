@@ -473,8 +473,16 @@ class MavenResolver:
 
     # -- effective POMs ----------------------------------------------------
 
-    async def _effective(self, coordinate: Coordinate) -> EffectivePom | None:
-        """Merge a POM with its parent chain and any BOMs it imports."""
+    async def _effective(
+        self, coordinate: Coordinate, visiting: frozenset[str] = frozenset()
+    ) -> EffectivePom | None:
+        """Merge a POM with its parent chain and any BOMs it imports.
+
+        ``visiting`` carries the BOM-import path that led here, so a cycle of
+        ``import``-scoped BOMs is cut rather than recursed into. Nothing on Central
+        should contain one, but "should" is not a stack-depth guarantee, and the
+        backfill path has no ``gather`` around it to absorb a RecursionError.
+        """
         pom = await self._fetch_pom(coordinate)
         if pom is None:
             return None
@@ -506,7 +514,7 @@ class MavenResolver:
 
         for entry in reversed(chain):
             await self._apply_management(
-                entry, properties, managed, managed_scopes, managed_exclusions
+                entry, properties, managed, managed_scopes, managed_exclusions, visiting
             )
 
         return EffectivePom(
@@ -525,6 +533,7 @@ class MavenResolver:
         managed: dict[str, str],
         managed_scopes: dict[str, str],
         managed_exclusions: dict[str, frozenset[str]],
+        visiting: frozenset[str] = frozenset(),
     ) -> None:
         """Fold one POM's dependencyManagement in, expanding imported BOMs first.
 
@@ -537,7 +546,14 @@ class MavenResolver:
             version = interpolate(entry.version, properties)
 
             if entry.is_import and version and not has_unresolved_property(version):
-                bom = await self._effective(Coordinate(group, artifact, version))
+                coordinate = Coordinate(group, artifact, version)
+                if str(coordinate) in visiting:
+                    # A BOM that imports itself, however indirectly. Everything it
+                    # manages was already folded in on the way down; recursing again
+                    # would never terminate.
+                    logger.debug("BOM import cycle at %s; not descending", coordinate)
+                    continue
+                bom = await self._effective(coordinate, visiting | {str(coordinate)})
                 if bom is not None:
                     properties.update(
                         {k: v for k, v in bom.properties.items() if k not in properties}

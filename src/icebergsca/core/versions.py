@@ -30,6 +30,16 @@ _ALPHA_RANK = -1
 #: an inclusive upper bound of ``2.0`` would exclude ``2.0.0``.
 _RELEASE_WIDTH = 4
 
+#: PEP 440 pre-release letters, already normalised by ``packaging`` (``alpha`` → ``a``).
+_PRE_RANK = {"a": 0, "b": 1, "rc": 2}
+#: Rank for a release with no pre-release segment — above every pre-release.
+_FINAL_RANK = 3
+#: Rank for a bare dev release (``1.0.dev1``), which PEP 440 sorts below any alpha.
+_DEV_RANK = -1
+
+#: The first element carries the epoch (always 0 outside PyPI) followed by the padded
+#: release; the second is 0 for a pre-release and 1 otherwise; the third orders the
+#: pre/post/dev suffix.
 VersionKey = tuple[tuple[int, ...], int, tuple[tuple[int, str], ...]]
 
 
@@ -54,12 +64,38 @@ def parse(ecosystem: EcosystemId, version: str) -> VersionKey | None:
         except InvalidVersion:
             return _loose(version)
         return (
-            _pad(parsed.release),
+            (parsed.epoch, *_pad(parsed.release)),
             0 if parsed.is_prerelease else 1,
-            ((0, str(parsed.pre or parsed.dev or "")),),
+            _pep440_suffix(parsed),
         )
 
     return _loose(version)
+
+
+def _pep440_suffix(parsed: Version) -> tuple[tuple[int, str], ...]:
+    """Order the pre/post/dev segments the way PEP 440 does.
+
+    dev < a < b < rc < final < post, with the numeric parts compared as numbers — a
+    stringified ``parsed.pre`` would place ``rc10`` below ``rc2``. Elements are
+    ``(int, str)`` pairs so the shape stays comparable with what :func:`_loose`
+    yields when an unparseable version in the same package fell back to it.
+    """
+    if parsed.pre is not None:
+        letter, number = parsed.pre
+        pre_rank, pre_number = _PRE_RANK.get(letter, _FINAL_RANK - 1), number
+    elif parsed.dev is not None and parsed.post is None:
+        pre_rank, pre_number = _DEV_RANK, 0
+    else:
+        pre_rank, pre_number = _FINAL_RANK, 0
+    return (
+        (pre_rank, ""),
+        (pre_number, ""),
+        # An absent post-release sorts below ``.post0``, so ``1.0 < 1.0.post0``.
+        (-1 if parsed.post is None else parsed.post, ""),
+        # A dev marker sorts below its own release: ``1.0a1.dev1 < 1.0a1``.
+        (1 if parsed.dev is None else 0, ""),
+        (parsed.dev or 0, ""),
+    )
 
 
 def _loose(version: str) -> VersionKey | None:
@@ -85,7 +121,9 @@ def _loose(version: str) -> VersionKey | None:
     )
     if not release:
         return None
-    release = _pad(release)
+    # The leading 0 is the epoch slot, so a loose key stays comparable with a PEP 440
+    # one when both appear for the same PyPI package.
+    release = (0, *_pad(release))
 
     prerelease: tuple[tuple[int, str], ...] = tuple(
         (int(segment), "") if segment.isdigit() else (_ALPHA_RANK, segment.lower())

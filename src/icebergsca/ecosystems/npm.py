@@ -167,9 +167,13 @@ def _find_line(content: str, name: str) -> int | None:
 
 def _entry_scope(entry: dict[str, Any]) -> Scope | None:
     """Read npm's precomputed scope flags, or ``None`` if it recorded none."""
-    if entry.get("dev") or entry.get("devOptional"):
+    if entry.get("dev"):
         return Scope.DEV
-    if entry.get("optional"):
+    if entry.get("optional") or entry.get("devOptional"):
+        # ``devOptional`` marks a package that is in the dev tree *and* an optional
+        # dependency of something that ships, so a production install still gets it.
+        # Optional is scanned by default and dev is not — calling it dev would hide
+        # a shipping package, which is the one direction this tool must not fail in.
         return Scope.OPTIONAL
     return None
 
@@ -500,7 +504,10 @@ def _link_yarn_children(
 
 
 _YARN_HEADER = re.compile(r"^(?P<specs>\S.*?):\s*$")
-_YARN_FIELD = re.compile(r'^\s+(?P<key>[\w-]+)\s+"?(?P<value>[^"]*)"?\s*$')
+#: A field or dependency line. The key may be quoted — yarn writes scoped packages
+#: as ``"@babel/core" "^7.0.0"`` — and a key pattern that cannot match the quotes
+#: silently drops every ``@scope/`` edge in the file.
+_YARN_FIELD = re.compile(r'^\s+"?(?P<key>[^\s"]+)"?\s+"?(?P<value>[^"]*)"?\s*$')
 
 
 def _parse_yarn_v1(path: Path, content: str) -> list[Dependency]:
@@ -544,9 +551,7 @@ def _parse_yarn_v1(path: Path, content: str) -> list[Dependency]:
         if field is None:
             continue
         if section in ("dependencies", "optionalDependencies"):
-            current["dependencies"][field.group("key").strip('"')] = field.group(
-                "value"
-            )
+            current["dependencies"][field.group("key")] = field.group("value")
         elif field.group("key") == "version":
             current["version"] = field.group("value")
             section = None

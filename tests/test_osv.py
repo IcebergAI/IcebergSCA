@@ -315,6 +315,30 @@ async def test_stale_cache_is_used_when_osv_is_down_and_says_so() -> None:
     assert any("expired cache" in w for w in result.warnings)
 
 
+async def test_failed_detail_fetch_keeps_the_finding() -> None:
+    """querybatch said the package is affected; losing the detail must not lose that.
+
+    The hit degrades to an ID with an unknown severity and no fix version — but a
+    package OSV says is affected must never render as clean because a second request
+    failed.
+    """
+    client, _, _ = make_client(
+        {
+            f"POST:{QUERYBATCH_URL}": batch(
+                [{"id": GHSA, "modified": ADVISORY["modified"]}]
+            )
+            # No GET stub: the detail request 404s.
+        }
+    )
+    result = await client.scan([REQUESTS])
+
+    (hit,) = result.advisories[REQUESTS]
+    assert hit.advisory.id == GHSA
+    assert hit.advisory.level is SeverityLevel.UNKNOWN
+    assert hit.fixed_version is None
+    assert any("could not fetch details" in w for w in result.warnings)
+
+
 async def test_offline_mode_makes_no_requests() -> None:
     client, transport, _ = make_client({}, offline=True)
     result = await client.scan([REQUESTS])
