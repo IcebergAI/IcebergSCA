@@ -32,3 +32,10 @@ ms@^2.1.3:
   version "2.1.3"
   resolved "https://registry.yarnpkg.com/ms/-/ms-2.1.3.tgz#mno"
   integrity sha512-eeee
+
+app-ui@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/app-ui/-/app-ui-1.0.0.tgz#pqr"
+  integrity sha512-ffff
+  dependencies:
+    "@scope/widget" "^2.0.0"
