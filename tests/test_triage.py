@@ -92,6 +92,15 @@ def test_a_native_toml_date_is_accepted_as_well_as_a_quoted_one() -> None:
     assert rule.expires == date(2026, 12, 25)
 
 
+def test_a_native_toml_datetime_becomes_a_date() -> None:
+    """``datetime`` is a ``date`` to isinstance but not to comparison: left as-is,
+    ``today > expires`` raises at matching time and takes the scan down with it."""
+    (rule,) = rules(entry() + "expires = 2026-12-25 09:30:00\n")
+    assert rule.expires == date(2026, 12, 25)
+    assert rule.is_expired(date(2026, 12, 26)) is True
+    assert rule.is_expired(date(2026, 12, 25)) is False
+
+
 @pytest.mark.parametrize("missing", ["advisory", "package", "reason"])
 def test_a_missing_required_field_is_an_error(missing: str) -> None:
     fields = {
