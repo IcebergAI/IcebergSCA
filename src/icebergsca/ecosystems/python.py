@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.specifiers import SpecifierSet
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from icebergsca.core.errors import ParseError
 from icebergsca.core.graph import Node, most_included, resolve
@@ -80,6 +80,22 @@ def _pin_from_specifier(spec: SpecifierSet) -> tuple[str | None, Pin]:
     if len(exact) == 1 and len(list(spec)) == 1 and not exact[0].version.endswith("*"):
         return exact[0].version, Pin.PINNED
     return None, Pin.UNRESOLVED
+
+
+def _pin_from_constraint(constraint: str | None) -> tuple[str | None, Pin]:
+    """The same pin rules, for a constraint that is still a raw string.
+
+    Slicing ``==`` off the front by hand would read ``==1.*`` as the version ``1.*``
+    — a junk version that OSV matches nothing against — and ``===1.2.3`` as
+    ``=1.2.3``. Going through the specifier parser keeps one definition of "pinned".
+    """
+    if not constraint:
+        return None, Pin.UNRESOLVED
+    try:
+        spec = SpecifierSet(constraint)
+    except InvalidSpecifier:
+        return None, Pin.UNRESOLVED
+    return _pin_from_specifier(spec)
 
 
 def _find_line(content: str, needle: str) -> int | None:
@@ -395,16 +411,14 @@ def _parse_pipfile(path: Path, content: str) -> list[Dependency]:
             # Pipfile writes "*" for "any version", which is a constraint carrying
             # no information rather than a version.
             constraint = None if constraint in ("*", "") else constraint
-            version = (
-                constraint[2:] if constraint and constraint.startswith("==") else None
-            )
+            version, pin = _pin_from_constraint(constraint)
             dependencies.append(
                 Dependency(
                     ref=PackageRef(EcosystemId.PYPI, _normalise(name), version),
                     scope=scope,
                     direct=True,
                     source=SourceLocation(path, _find_line(content, name)),
-                    pin=Pin.PINNED if version else Pin.UNRESOLVED,
+                    pin=pin,
                     constraint=constraint,
                 )
             )
@@ -507,14 +521,20 @@ def _parse_uv_lock(path: Path, content: str) -> list[Dependency]:
 
 
 def _collect_uv_seeds(root: dict[str, Any], seeds: dict[str, Scope]) -> None:
-    """Record what the project asked for directly, and under which scope."""
+    """Record what the project asked for directly, and under which scope.
+
+    A package declared in several groups is merged to the most-included scope, not
+    to whichever group happened to be read first: an extra listed under both
+    ``docs`` and ``gui`` installs whenever either is asked for, and first-wins
+    would let the dev-flavoured group hide it from the default scan.
+    """
     for name in _uv_names(root.get("dependencies")):
-        seeds[name] = Scope.RUNTIME
+        _seed(seeds, name, Scope.RUNTIME)
 
     for group, entries in (root.get("optional-dependencies") or {}).items():
         scope = _scope_for_group(group)
         for name in _uv_names(entries):
-            seeds.setdefault(name, scope)
+            _seed(seeds, name, scope)
 
     # PEP 735 groups live under metadata and are development tooling by definition.
     metadata = root.get("metadata")
@@ -523,7 +543,12 @@ def _collect_uv_seeds(root: dict[str, Any], seeds: dict[str, Scope]) -> None:
         for group, entries in requires_dev.items():
             scope = _scope_for_group(group) if group else Scope.DEV
             for name in _uv_names(entries):
-                seeds.setdefault(name, scope)
+                _seed(seeds, name, scope)
+
+
+def _seed(seeds: dict[str, Scope], name: str, scope: Scope) -> None:
+    current = seeds.get(name)
+    seeds[name] = scope if current is None else most_included((scope, current))
 
 
 # ---------------------------------------------------------------------------
@@ -613,7 +638,8 @@ def _parse_pipfile_lock(path: Path, content: str) -> list[Dependency]:
             continue
         for name, entry in table.items():
             raw = entry.get("version") if isinstance(entry, dict) else None
-            version = raw[2:] if isinstance(raw, str) and raw.startswith("==") else None
+            constraint = raw if isinstance(raw, str) else None
+            version, pin = _pin_from_constraint(constraint)
             dependencies.append(
                 Dependency(
                     ref=PackageRef(EcosystemId.PYPI, _normalise(name), version),
@@ -623,8 +649,8 @@ def _parse_pipfile_lock(path: Path, content: str) -> list[Dependency]:
                     # merges that in; assuming direct here would be a guess.
                     direct=False,
                     source=source,
-                    pin=Pin.PINNED if version else Pin.UNRESOLVED,
-                    constraint=raw if isinstance(raw, str) else None,
+                    pin=pin,
+                    constraint=constraint,
                 )
             )
 
