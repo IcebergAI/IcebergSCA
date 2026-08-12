@@ -66,6 +66,20 @@ def to_dict(
         "dependencies": _dependency_graph(report),
     }
 
+    recorded_parents = {
+        parent.purl for dep in report.dependencies for parent in dep.parents
+    }
+    unknown_dependencies = sorted(
+        {dep.ref.purl for dep in report.dependencies} - recorded_parents
+    )
+    if unknown_dependencies:
+        document["compositions"] = [
+            {
+                "aggregate": "incomplete",
+                "dependencies": unknown_dependencies,
+            }
+        ]
+
     if include_vulnerabilities:
         document["vulnerabilities"] = [
             _vulnerability(finding) for finding in report.sorted_findings()
@@ -146,10 +160,6 @@ def _dependency_graph(report: ScanReport) -> list[dict[str, Any]]:
             children.setdefault(parent.purl, [])
             if dep.ref.purl not in children[parent.purl]:
                 children[parent.purl].append(dep.ref.purl)
-
-    # Every component needs an entry, even an empty one, for the graph to be valid.
-    for dep in report.dependencies:
-        children.setdefault(dep.ref.purl, [])
 
     return [
         {"ref": ref, "dependsOn": sorted(dependencies)}
