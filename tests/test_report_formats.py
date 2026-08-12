@@ -299,7 +299,10 @@ def test_cyclonedx_dependency_graph_uses_recorded_parents() -> None:
     assert graph["pkg:npm/express@4.19.2"] == ["pkg:npm/ms@2.0.0"]
     assert "pkg:npm/ms@2.0.0" not in graph
     assert document["compositions"] == [
-        {"aggregate": "unknown", "dependencies": ["pkg:npm/ms@2.0.0"]}
+        {
+            "aggregate": "unknown",
+            "dependencies": ["pkg:npm/express@4.19.2", "pkg:npm/ms@2.0.0"],
+        }
     ]
 
 

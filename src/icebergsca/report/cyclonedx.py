@@ -66,12 +66,10 @@ def to_dict(
         "dependencies": _dependency_graph(report),
     }
 
-    recorded_parents = {
-        parent.purl for dep in report.dependencies for parent in dep.parents
-    }
-    unknown_dependencies = sorted(
-        {dep.ref.purl for dep in report.dependencies} - recorded_parents
-    )
+    # ``parents`` records observed edges, not whether a component's complete
+    # outgoing graph was available. Until the model carries that distinction,
+    # completeness is unknown for every emitted package relationship.
+    unknown_dependencies = sorted({dep.ref.purl for dep in report.dependencies})
     if unknown_dependencies:
         document["compositions"] = [
             {
