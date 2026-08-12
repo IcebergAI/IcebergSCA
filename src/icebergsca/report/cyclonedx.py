@@ -75,7 +75,11 @@ def to_dict(
     if unknown_dependencies:
         document["compositions"] = [
             {
-                "aggregate": "incomplete",
+                # The model cannot distinguish a known leaf from a component whose
+                # outgoing edges were unavailable. CycloneDX reserves "incomplete"
+                # for cases where additional relationships definitely exist;
+                # "unknown" preserves the uncertainty we actually observed.
+                "aggregate": "unknown",
                 "dependencies": unknown_dependencies,
             }
         ]
@@ -151,11 +155,13 @@ def _dependency_graph(report: ScanReport) -> list[dict[str, Any]]:
     is listed under each of them. Formats that record no edges simply contribute
     fewer entries rather than a fabricated flat tree.
     """
-    children: dict[str, list[str]] = {"root": []}
+    children: dict[str, list[str]] = {}
 
     for dep in report.dependencies:
-        if dep.direct and dep.ref.purl not in children["root"]:
-            children["root"].append(dep.ref.purl)
+        if dep.direct:
+            root_dependencies = children.setdefault("root", [])
+            if dep.ref.purl not in root_dependencies:
+                root_dependencies.append(dep.ref.purl)
         for parent in dep.parents:
             children.setdefault(parent.purl, [])
             if dep.ref.purl not in children[parent.purl]:

@@ -238,7 +238,9 @@ def test_cyclonedx_validates_against_the_official_schema() -> None:
 
 
 def test_cyclonedx_validates_when_empty() -> None:
-    validate_cyclonedx(cyclonedx.to_dict(make_report()))
+    document = cyclonedx.to_dict(make_report())
+    assert document["dependencies"] == []
+    validate_cyclonedx(document)
 
 
 def test_cyclonedx_components_carry_purls() -> None:
@@ -297,7 +299,7 @@ def test_cyclonedx_dependency_graph_uses_recorded_parents() -> None:
     assert graph["pkg:npm/express@4.19.2"] == ["pkg:npm/ms@2.0.0"]
     assert "pkg:npm/ms@2.0.0" not in graph
     assert document["compositions"] == [
-        {"aggregate": "incomplete", "dependencies": ["pkg:npm/ms@2.0.0"]}
+        {"aggregate": "unknown", "dependencies": ["pkg:npm/ms@2.0.0"]}
     ]
 
 
@@ -310,7 +312,7 @@ def test_cyclonedx_omits_unknown_empty_edges_and_marks_them_incomplete() -> None
     assert parentless.ref.purl in graph["root"]
     assert parentless.ref.purl not in graph
     assert document["compositions"] == [
-        {"aggregate": "incomplete", "dependencies": [parentless.ref.purl]}
+        {"aggregate": "unknown", "dependencies": [parentless.ref.purl]}
     ]
     validate_cyclonedx(document)
 
