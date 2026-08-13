@@ -8,6 +8,7 @@ this test proves the result is actually valid.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 from functools import cache
 from pathlib import Path
@@ -237,7 +238,9 @@ def test_cyclonedx_validates_against_the_official_schema() -> None:
 
 
 def test_cyclonedx_validates_when_empty() -> None:
-    validate_cyclonedx(cyclonedx.to_dict(make_report()))
+    document = cyclonedx.to_dict(make_report())
+    assert document["dependencies"] == []
+    validate_cyclonedx(document)
 
 
 def test_cyclonedx_components_carry_purls() -> None:
@@ -289,13 +292,41 @@ def test_cyclonedx_dependency_graph_links_direct_deps_to_the_root() -> None:
 def test_cyclonedx_dependency_graph_uses_recorded_parents() -> None:
     parent = make_dependency("express", "4.19.2", ecosystem=EcosystemId.NPM)
     child = make_dependency("ms", "2.0.0", ecosystem=EcosystemId.NPM, direct=False)
-    child = (
-        type(child)(**{**child.__dict__, "parents": (parent.ref,)}) if False else child
-    )
+    child = replace(child, parents=(parent.ref,))
     document = cyclonedx.to_dict(make_report(dependencies=(parent, child)))
     graph = {entry["ref"]: entry["dependsOn"] for entry in document["dependencies"]}
     assert "pkg:npm/express@4.19.2" in graph["root"]
-    assert "pkg:npm/ms@2.0.0" in graph
+    assert graph["pkg:npm/express@4.19.2"] == ["pkg:npm/ms@2.0.0"]
+    assert "pkg:npm/ms@2.0.0" not in graph
+    assert document["compositions"] == [
+        {
+            "aggregate": "unknown",
+            "dependencies": ["pkg:npm/express@4.19.2", "pkg:npm/ms@2.0.0"],
+        }
+    ]
+
+
+def test_cyclonedx_omits_unknown_empty_edges_and_marks_them_incomplete() -> None:
+    parentless = make_dependency("requests", "2.31.0")
+
+    document = cyclonedx.to_dict(make_report(dependencies=(parentless,)))
+    graph = {entry["ref"]: entry["dependsOn"] for entry in document["dependencies"]}
+
+    assert parentless.ref.purl in graph["root"]
+    assert parentless.ref.purl not in graph
+    assert document["compositions"] == [
+        {"aggregate": "unknown", "dependencies": [parentless.ref.purl]}
+    ]
+    validate_cyclonedx(document)
+
+
+def test_cyclonedx_incomplete_composition_deduplicates_component_refs() -> None:
+    dependency = make_dependency("requests", "2.31.0")
+
+    document = cyclonedx.to_dict(make_report(dependencies=(dependency, dependency)))
+
+    assert document["compositions"][0]["dependencies"] == [dependency.ref.purl]
+    validate_cyclonedx(document)
 
 
 def test_cyclonedx_component_properties_state_pin_and_scope() -> None:

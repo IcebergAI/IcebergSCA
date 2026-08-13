@@ -66,6 +66,22 @@ def to_dict(
         "dependencies": _dependency_graph(report),
     }
 
+    # ``parents`` records observed edges, not whether a component's complete
+    # outgoing graph was available. Until the model carries that distinction,
+    # completeness is unknown for every emitted package relationship.
+    unknown_dependencies = sorted({dep.ref.purl for dep in report.dependencies})
+    if unknown_dependencies:
+        document["compositions"] = [
+            {
+                # The model cannot distinguish a known leaf from a component whose
+                # outgoing edges were unavailable. CycloneDX reserves "incomplete"
+                # for cases where additional relationships definitely exist;
+                # "unknown" preserves the uncertainty we actually observed.
+                "aggregate": "unknown",
+                "dependencies": unknown_dependencies,
+            }
+        ]
+
     if include_vulnerabilities:
         document["vulnerabilities"] = [
             _vulnerability(finding) for finding in report.sorted_findings()
@@ -137,19 +153,17 @@ def _dependency_graph(report: ScanReport) -> list[dict[str, Any]]:
     is listed under each of them. Formats that record no edges simply contribute
     fewer entries rather than a fabricated flat tree.
     """
-    children: dict[str, list[str]] = {"root": []}
+    children: dict[str, list[str]] = {}
 
     for dep in report.dependencies:
-        if dep.direct and dep.ref.purl not in children["root"]:
-            children["root"].append(dep.ref.purl)
+        if dep.direct:
+            root_dependencies = children.setdefault("root", [])
+            if dep.ref.purl not in root_dependencies:
+                root_dependencies.append(dep.ref.purl)
         for parent in dep.parents:
             children.setdefault(parent.purl, [])
             if dep.ref.purl not in children[parent.purl]:
                 children[parent.purl].append(dep.ref.purl)
-
-    # Every component needs an entry, even an empty one, for the graph to be valid.
-    for dep in report.dependencies:
-        children.setdefault(dep.ref.purl, [])
 
     return [
         {"ref": ref, "dependsOn": sorted(dependencies)}

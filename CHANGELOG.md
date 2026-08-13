@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Retry with exponential backoff and jitter on OSV rate limits and server errors, honouring
   `Retry-After`; expired cache entries are served, and labelled, when OSV is unreachable.
 
+### Fixed
+
+- CycloneDX output no longer emits empty dependency edges for components whose outgoing graph
+  was not observed. Those relationships are omitted and disclosed with an `unknown`
+  composition instead of being falsely declared dependency-free.
+
 ### Design notes
 
 - **A scan never implies a clean result it did not earn.** Reports carry an explicit
